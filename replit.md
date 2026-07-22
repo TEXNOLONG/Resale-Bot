@@ -1,44 +1,70 @@
-# [Project name]
+# veachelsell — Telegram-бот магазина
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Telegram-бот для ресейл-магазина veachelsell: каталог товаров по категориям, поиск, отзывы, полноценная админ-панель прямо в Telegram.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `Telegram Bot` workflow — основной бот (`cd bots/telegram-bot && python3.11 main.py`)
+- Секреты: `BOT_TOKEN` (Replit Secrets), `SHOP_NAME`, `ADMIN_IDS` (env vars)
+- DB: PostgreSQL (Replit managed) — схема инициализируется автоматически
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Python 3.11 + aiogram 3.x (Telegram Bot)
+- asyncpg — прямые запросы к PostgreSQL
+- aiogram FSM — для многошаговых форм в админке
+- PostgreSQL — товары, категории, отзывы, пользователи, статистика кликов
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+```
+bots/telegram-bot/
+├── main.py              — точка входа, регистрация роутеров
+├── config.py            — конфигурация из env
+├── database.py          — все запросы к БД (asyncpg)
+├── handlers/
+│   ├── start.py         — /start, главное меню, контакты
+│   ├── catalog.py       — каталог по категориям, карточки товаров
+│   ├── search.py        — поиск товаров по тексту
+│   ├── reviews.py       — просмотр и добавление отзывов
+│   └── admin/
+│       ├── admin_main.py       — /admin команда, дашборд
+│       ├── admin_products.py   — добавление/редактирование/удаление товаров
+│       ├── admin_categories.py — управление категориями
+│       ├── admin_stats.py      — статистика (просмотры, клики, пользователи)
+│       └── admin_settings.py   — фото/текст приветствия, контакты, модерация отзывов
+├── keyboards/           — inline-клавиатуры
+└── states/forms.py      — FSM-состояния для форм
+```
 
-## Architecture decisions
+## Функции бота
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+**Для покупателей:**
+- `/start` — приветствие с фото и меню
+- 📦 Товары → категории → список товаров → карточка с фото и ценой → оформление
+- 🔍 Поиск — полнотекстовый поиск по названию и описанию
+- ⭐ Отзывы — просмотр отзывов, добавление с фото и оценкой
+- 📞 Контакты — контактная информация магазина
 
-## Product
-
-_Describe the high-level user-facing capabilities of this app once they exist._
+**Для администраторов (`/admin`):**
+- 📦 Товары — добавить / редактировать (название, описание, цена, наличие) / удалить
+- 🗂 Категории — добавить с эмодзи / удалить
+- ⭐ Отзывы — модерация (одобрить / удалить)
+- 📊 Статистика — пользователи, клики, топ товаров по просмотрам и кликам
+- ⚙️ Настройки — приветственное фото, текст, контакты
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Только Telegram-бот, без веб-интерфейса
+- Админ-панель внутри бота через /admin
+- Язык бота: русский
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- ADMIN_IDS = `7307275806,1038562411` — только эти ID имеют доступ к /admin
+- При добавлении товара фото отправляются по одному, затем «Готово»
+- Отзывы требуют одобрения модератора перед публикацией
+- `python3.11` — не `python` или `python3`
 
 ## Pointers
 
