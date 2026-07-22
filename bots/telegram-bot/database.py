@@ -18,6 +18,61 @@ async def close_pool():
         _pool = None
 
 
+async def init_db():
+    pool = await get_pool()
+    await pool.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            telegram_id BIGINT UNIQUE NOT NULL,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS categories (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            emoji TEXT NOT NULL DEFAULT '',
+            order_num INT NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS products (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            price NUMERIC(12,2) NOT NULL DEFAULT 0,
+            category_id INT REFERENCES categories(id) ON DELETE SET NULL,
+            in_stock BOOLEAN NOT NULL DEFAULT TRUE,
+            views INT NOT NULL DEFAULT 0,
+            photos TEXT[] NOT NULL DEFAULT '{}'
+        );
+
+        CREATE TABLE IF NOT EXISTS reviews (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            username TEXT,
+            text TEXT NOT NULL DEFAULT '',
+            rating INT NOT NULL DEFAULT 5,
+            photo_file_id TEXT,
+            is_approved BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS product_clicks (
+            id SERIAL PRIMARY KEY,
+            product_id INT REFERENCES products(id) ON DELETE CASCADE,
+            user_id BIGINT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """)
+
+
 # ─── Settings ──────────────────────────────────────────────────────────────
 
 async def get_setting(key: str) -> str:

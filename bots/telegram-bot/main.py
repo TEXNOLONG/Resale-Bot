@@ -41,9 +41,9 @@ async def main():
     dp.include_router(search_router)
     dp.include_router(reviews_router)
 
-    # Initialize DB pool
-    await db.get_pool()
-    logger.info("Database pool initialized")
+    # Initialize DB pool and schema
+    await db.init_db()
+    logger.info("Database initialized")
 
     logger.info("Starting bot...")
     try:
