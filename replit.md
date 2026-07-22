@@ -59,6 +59,32 @@ bots/telegram-bot/
 - Админ-панель внутри бота через /admin
 - Язык бота: русский
 
+## Заполнение товаров (первый запуск)
+
+Товары и фото уже подготовлены из PDF-каталога. Чтобы загрузить их в БД:
+
+1. Установите секреты `BOT_TOKEN`, `DATABASE_URL`, `ADMIN_IDS` в Replit Secrets
+2. Откройте `bots/telegram-bot/seed_products.py` и вставьте цены в словарь `PRICES`
+3. Запустите скрипт:
+   ```
+   cd bots/telegram-bot && python3.11 seed_products.py
+   ```
+   Скрипт создаст категории, загрузит фото в Telegram и добавит все 7 товаров.
+
+Фото по продуктам: `bots/telegram-bot/seed_photos/`
+
+| Папка | Товар |
+|---|---|
+| 1_hoodie_print | Худи с авторским принтом |
+| 2_hoodie_philipp_plein | Худи Philipp Plein |
+| 3_hoodie_yohji_yamamoto | Худи Yohji Yamamoto |
+| 4_longsleeve_yohji_yamamoto | Лонгслив Yohji Yamamoto (белый) |
+| 5_longsleeve_marcelo_burlon | Лонгслив Marcelo Burlon |
+| 6_longsleeve_acne_studios | Лонгслив Acne Studios Stockholm 1996 |
+| 7_airpods_pro | AirPods Pro 2 |
+
+Цены после загрузки можно менять через `/admin` → Товары → Редактировать.
+
 ## Gotchas
 
 - ADMIN_IDS = `7307275806,1038562411` — только эти ID имеют доступ к /admin
