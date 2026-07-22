@@ -1,14 +1,39 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, InputMediaPhoto
-from aiogram.utils.media_group import MediaGroupBuilder
+from aiogram.types import CallbackQuery
 
 import database as db
 from keyboards.catalog_kb import (
-    categories_kb, products_list_kb, product_detail_kb, buy_kb
+    categories_kb, products_list_kb, product_detail_kb
 )
 
 router = Router()
 
+# ─── helpers ──────────────────────────────────────────────────────────────────
+
+async def safe_text(callback: CallbackQuery, text: str, kb):
+    """Edit existing message to text; if it's a photo message — delete + resend."""
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+async def safe_photo(callback: CallbackQuery, photo: str, caption: str, kb):
+    """Always delete current message and send a fresh photo card."""
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.message.answer_photo(
+        photo, caption=caption, reply_markup=kb, parse_mode="HTML"
+    )
+
+
+# ─── catalog ──────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "catalog")
 async def cb_catalog(callback: CallbackQuery):
@@ -16,17 +41,9 @@ async def cb_catalog(callback: CallbackQuery):
     categories = await db.get_categories()
     if not categories:
         from keyboards.main_kb import back_to_menu_kb
-        await callback.message.edit_text(
-            "Категорий пока нет. Зайдите позже.",
-            reply_markup=back_to_menu_kb()
-        )
+        await safe_text(callback, "Категорий пока нет. Зайдите позже.", back_to_menu_kb())
         return
-
-    await callback.message.edit_text(
-        "<b>Каталог</b>\n\nВыберите категорию:",
-        reply_markup=categories_kb(categories),
-        parse_mode="HTML"
-    )
+    await safe_text(callback, "<b>Каталог</b>\n\nВыберите категорию:", categories_kb(categories))
 
 
 @router.callback_query(F.data.startswith("cat_"))
@@ -38,18 +55,18 @@ async def cb_category(callback: CallbackQuery):
 
     if not products:
         categories = await db.get_categories()
-        await callback.message.edit_text(
+        await safe_text(
+            callback,
             f"В категории <b>{category['name']}</b> пока нет товаров.",
-            reply_markup=categories_kb(categories),
-            parse_mode="HTML"
+            categories_kb(categories)
         )
         return
 
     cat_name = f"{category['emoji']} {category['name']}" if category else "Категория"
-    await callback.message.edit_text(
-        f"<b>{cat_name}</b>\n\nТоваров: {len(products)}\nВыберите:",
-        reply_markup=products_list_kb(products, category_id),
-        parse_mode="HTML"
+    await safe_text(
+        callback,
+        f"<b>{cat_name}</b>\n\nТоваров: {len(products)}",
+        products_list_kb(products, category_id)
     )
 
 
@@ -60,70 +77,45 @@ async def cb_product(callback: CallbackQuery):
     product = await db.get_product(product_id)
 
     if not product:
-        await callback.message.edit_text("Товар не найден.")
+        await safe_text(callback, "Товар не найден.", None)
         return
 
     await db.increment_views(product_id)
     await db.add_product_click(product_id, callback.from_user.id)
 
-    stock_text = "В наличии" if product["in_stock"] else "Нет в наличии"
+    stock_text = "В наличии ✓" if product["in_stock"] else "Нет в наличии"
+    price_fmt = f"{product['price']:,.0f}".replace(",", " ")
 
-    text = (
+    caption = (
         f"<b>{product['name']}</b>\n"
         f"━━━━━━━━━━━━━━\n"
-        f"Цена: <b>{product['price']:,.0f} ₽</b>\n"
-        f"Статус: {stock_text}\n"
+        f"Цена: <b>{price_fmt} ₽</b>   {stock_text}\n"
     )
     if product["description"]:
-        text += f"\n{product['description']}"
+        # Telegram caption limit is 1024 chars — trim if needed
+        desc = product["description"]
+        available = 1024 - len(caption) - 2
+        if len(desc) > available:
+            desc = desc[:available - 1] + "…"
+        caption += f"\n{desc}"
 
     kb = product_detail_kb(product_id, product["category_id"] or 0)
-
     photos = product.get("photos") or []
-    if photos and len(photos) == 1:
-        try:
-            await callback.message.delete()
-            await callback.message.answer_photo(
-                photos[0],
-                caption=text,
-                reply_markup=kb,
-                parse_mode="HTML"
-            )
-        except Exception:
-            await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    elif photos and len(photos) > 1:
-        try:
-            await callback.message.delete()
-            media_group = MediaGroupBuilder()
-            for i, photo in enumerate(photos[:10]):
-                media_group.add_photo(media=photo, caption=text if i == 0 else None, parse_mode="HTML" if i == 0 else None)
-            await callback.message.answer_media_group(media=media_group.build())
-            await callback.message.answer("Фото выше ↑", reply_markup=kb)
-        except Exception:
-            await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+    if photos:
+        await safe_photo(callback, photos[0], caption, kb)
     else:
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        await safe_text(callback, caption, kb)
 
 
 @router.callback_query(F.data.startswith("buy_"))
 async def cb_buy(callback: CallbackQuery):
-    await callback.answer()
     product_id = int(callback.data.split("_")[1])
     product = await db.get_product(product_id)
+    contact_info = await db.get_setting("contact_info") or "Контакты не указаны"
 
-    if not product:
-        return
+    price_fmt = f"{product['price']:,.0f}".replace(",", " ") if product else "—"
+    name = product["name"] if product else "—"
 
-    contact_info = await db.get_setting("contact_info")
-    text = (
-        f"<b>Оформление заказа</b>\n\n"
-        f"Товар: <b>{product['name']}</b>\n"
-        f"Цена: <b>{product['price']:,.0f} ₽</b>\n\n"
-        f"Напишите нам:\n{contact_info}"
-    )
-
-    kb = buy_kb(product_id)
-    try:
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    alert = f"{name} — {price_fmt} ₽\n\n{contact_info}"
+    await callback.answer(alert, show_alert=True)
