@@ -1,11 +1,11 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
 import database as db
 from config import ADMIN_IDS
 from keyboards.admin_kb import admin_settings_kb, cancel_kb
-from states.forms import SetWelcome, SetContact
+from states.forms import SetWelcome, SetContact, SetAbout, SetChannel
 
 router = Router()
 
@@ -22,17 +22,23 @@ async def cb_adm_settings(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     welcome_text = await db.get_setting("welcome_text")
     contact_info = await db.get_setting("contact_info")
-    has_photo = bool(await db.get_setting("welcome_photo"))
+    about_text   = await db.get_setting("about_us_text")
+    channel_url  = await db.get_setting("reviews_channel")
+    has_photo    = bool(await db.get_setting("welcome_photo"))
 
     text = (
         f"⚙️ <b>Настройки бота</b>\n\n"
         f"🖼 Приветственное фото: {'✅ есть' if has_photo else '❌ не задано'}\n"
-        f"📝 Приветственный текст:\n<i>{welcome_text[:100]}...</i>\n\n"
-        f"📞 Контакты:\n<i>{contact_info}</i>\n\n"
+        f"📝 Приветственный текст:\n<i>{(welcome_text or '')[:100]}</i>\n\n"
+        f"📞 Контакты:\n<i>{contact_info or 'не задано'}</i>\n\n"
+        f"ℹ️ О нас:\n<i>{(about_text or '')[:80] or 'не задано'}</i>\n\n"
+        f"📢 Канал с отзывами: {channel_url or 'не задан'}\n\n"
         f"Что изменить?"
     )
     await callback.message.edit_text(text, reply_markup=admin_settings_kb(), parse_mode="HTML")
 
+
+# ─── Welcome photo ───────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "adm_set_photo")
 async def cb_set_photo(callback: CallbackQuery, state: FSMContext):
@@ -40,15 +46,11 @@ async def cb_set_photo(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer()
     await state.set_state(SetWelcome.photo)
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🗑 Убрать фото", callback_data="adm_remove_photo")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="adm_settings")],
     ])
-    await callback.message.edit_text(
-        "🖼 Отправьте новое приветственное фото:",
-        reply_markup=kb
-    )
+    await callback.message.edit_text("🖼 Отправьте новое приветственное фото:", reply_markup=kb)
 
 
 @router.callback_query(SetWelcome.photo, F.data == "adm_remove_photo")
@@ -71,6 +73,8 @@ async def process_welcome_photo(message: Message, state: FSMContext):
     await message.answer("✅ Приветственное фото обновлено!", reply_markup=admin_settings_kb())
 
 
+# ─── Welcome text ─────────────────────────────────────────────────────────────
+
 @router.callback_query(F.data == "adm_set_welcome_text")
 async def cb_set_welcome_text(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -78,8 +82,7 @@ async def cb_set_welcome_text(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state(SetWelcome.text)
     await callback.message.edit_text(
-        "📝 Введите новый приветственный текст:",
-        reply_markup=cancel_kb("adm_settings")
+        "📝 Введите новый приветственный текст:", reply_markup=cancel_kb("adm_settings")
     )
 
 
@@ -92,6 +95,8 @@ async def process_welcome_text(message: Message, state: FSMContext):
     await message.answer("✅ Приветственный текст обновлён!", reply_markup=admin_settings_kb())
 
 
+# ─── Contact info ─────────────────────────────────────────────────────────────
+
 @router.callback_query(F.data == "adm_set_contact")
 async def cb_set_contact(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -99,7 +104,7 @@ async def cb_set_contact(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state(SetContact.text)
     await callback.message.edit_text(
-        "📞 Введите новые контактные данные (текст, ссылки, @username):",
+        "📞 Введите контактные данные (текст, ссылки, @username):",
         reply_markup=cancel_kb("adm_settings")
     )
 
@@ -111,6 +116,72 @@ async def process_contact_text(message: Message, state: FSMContext):
     await state.clear()
     await db.set_setting("contact_info", message.text)
     await message.answer("✅ Контактная информация обновлена!", reply_markup=admin_settings_kb())
+
+
+# ─── About us ─────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "adm_set_about")
+async def cb_set_about(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await callback.answer()
+    await state.set_state(SetAbout.text)
+    await callback.message.edit_text(
+        "ℹ️ Введите текст для раздела «О нас»:",
+        reply_markup=cancel_kb("adm_settings")
+    )
+
+
+@router.message(SetAbout.text)
+async def process_about_text(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    await db.set_setting("about_us_text", message.text)
+    await message.answer("✅ Текст «О нас» обновлён!", reply_markup=admin_settings_kb())
+
+
+# ─── Reviews channel ──────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "adm_set_reviews_channel")
+async def cb_set_reviews_channel(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await callback.answer()
+    await state.set_state(SetChannel.url)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Убрать канал", callback_data="adm_remove_channel")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="adm_settings")],
+    ])
+    await callback.message.edit_text(
+        "📢 Введите ссылку на ваш Telegram-канал с отзывами:\n\n"
+        "<i>Пример: https://t.me/mychannel</i>",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(SetChannel.url, F.data == "adm_remove_channel")
+async def cb_remove_channel(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await callback.answer()
+    await state.clear()
+    await db.set_setting("reviews_channel", "")
+    await callback.message.edit_text("✅ Ссылка на канал убрана.", reply_markup=admin_settings_kb())
+
+
+@router.message(SetChannel.url)
+async def process_channel_url(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    url = message.text.strip()
+    if not (url.startswith("http://") or url.startswith("https://") or url.startswith("tg://")):
+        await message.answer("❌ Введите корректную ссылку (начинается с https://):")
+        return
+    await state.clear()
+    await db.set_setting("reviews_channel", url)
+    await message.answer(f"✅ Канал с отзывами сохранён: {url}", reply_markup=admin_settings_kb())
 
 
 # ─── Review Management ───────────────────────────────────────────────────────
@@ -142,14 +213,11 @@ async def cb_pending_reviews(callback: CallbackQuery):
         return
 
     review = reviews[0]
-    stars = "⭐" * review["rating"]
+    stars    = "⭐" * review["rating"]
     username = f"@{review['username']}" if review["username"] else "Аноним"
-
     text = (
         f"⏳ <b>Отзыв на модерации</b> (осталось: {len(reviews)})\n\n"
-        f"👤 {username}\n"
-        f"{stars}\n\n"
-        f"💬 {review['text']}"
+        f"👤 {username}\n{stars}\n\n💬 {review['text']}"
     )
     from keyboards.admin_kb import review_actions_kb
     if review.get("photo_file_id"):
@@ -174,17 +242,14 @@ async def cb_approved_reviews(callback: CallbackQuery):
     await callback.answer()
     reviews = await db.get_approved_reviews(limit=10)
     from keyboards.admin_kb import admin_reviews_kb
-
     if not reviews:
         await callback.message.edit_text("📭 Нет одобренных отзывов.", reply_markup=admin_reviews_kb())
         return
-
     text = "✅ <b>Одобренные отзывы:</b>\n\n"
     for rev in reviews:
-        stars = "⭐" * rev["rating"]
+        stars    = "⭐" * rev["rating"]
         username = f"@{rev['username']}" if rev["username"] else "Аноним"
         text += f"{stars} {username}: {rev['text'][:80]}...\n\n"
-
     await callback.message.edit_text(text, reply_markup=admin_reviews_kb(), parse_mode="HTML")
 
 
@@ -195,7 +260,6 @@ async def cb_approve_review(callback: CallbackQuery):
     await callback.answer("✅ Одобрено!")
     review_id = int(callback.data.split("_")[3])
     await db.approve_review(review_id)
-    # show next pending
     await cb_pending_reviews(callback)
 
 

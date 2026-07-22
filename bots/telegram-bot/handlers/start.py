@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 import database as db
-from keyboards.main_kb import main_menu_kb
+from keyboards.main_kb import main_menu_kb, back_to_menu_kb
 
 router = Router()
 
@@ -62,10 +62,29 @@ async def cb_contacts(callback: CallbackQuery):
     contact_info = await db.get_setting("contact_info")
     if not contact_info:
         contact_info = "Контакты не указаны"
-
-    from keyboards.main_kb import back_to_menu_kb
     await callback.message.edit_text(
         f"<b>Контакты</b>\n\n{contact_info}",
         reply_markup=back_to_menu_kb(),
         parse_mode="HTML"
     )
+
+
+@router.callback_query(F.data == "about_us")
+async def cb_about_us(callback: CallbackQuery):
+    await callback.answer()
+    about_text = await db.get_setting("about_us_text")
+    if not about_text:
+        about_text = (
+            "Мы — магазин качественной одежды и аксессуаров.\n\n"
+            "Чтобы добавить текст «О нас», перейдите в Настройки в панели администратора."
+        )
+    await callback.message.edit_text(
+        f"ℹ️ <b>О нас</b>\n\n{about_text}",
+        reply_markup=back_to_menu_kb(),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "noop")
+async def cb_noop(callback: CallbackQuery):
+    await callback.answer()

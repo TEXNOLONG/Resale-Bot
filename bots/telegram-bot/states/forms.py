@@ -38,3 +38,19 @@ class SetWelcome(StatesGroup):
 
 class SetContact(StatesGroup):
     text = State()
+
+
+class SetAbout(StatesGroup):
+    text = State()
+
+
+class SetChannel(StatesGroup):
+    url = State()
+
+
+class PlaceOrder(StatesGroup):
+    comment = State()
+
+
+class AdminReply(StatesGroup):
+    message = State()

@@ -12,7 +12,11 @@ def admin_main_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📊 Статистика", callback_data="adm_stats"),
         ],
         [
-            InlineKeyboardButton(text="⚙️ Настройки бота", callback_data="adm_settings"),
+            InlineKeyboardButton(text="🛒 Заказы", callback_data="adm_orders"),
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="adm_settings"),
+        ],
+        [
+            InlineKeyboardButton(text="📋 Скачать логи", callback_data="adm_logs"),
         ],
     ])
 
@@ -45,10 +49,25 @@ def admin_reviews_kb() -> InlineKeyboardMarkup:
 
 def admin_settings_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🖼 Изменить приветственное фото", callback_data="adm_set_photo")],
-        [InlineKeyboardButton(text="📝 Изменить приветственный текст", callback_data="adm_set_welcome_text")],
-        [InlineKeyboardButton(text="📞 Изменить контакты", callback_data="adm_set_contact")],
+        [InlineKeyboardButton(text="🖼 Приветственное фото", callback_data="adm_set_photo")],
+        [InlineKeyboardButton(text="📝 Приветственный текст", callback_data="adm_set_welcome_text")],
+        [InlineKeyboardButton(text="📞 Контакты", callback_data="adm_set_contact")],
+        [InlineKeyboardButton(text="ℹ️ Текст «О нас»", callback_data="adm_set_about")],
+        [InlineKeyboardButton(text="📢 Канал с отзывами", callback_data="adm_set_reviews_channel")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="adm_back")],
+    ])
+
+
+def admin_orders_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Последние заказы", callback_data="adm_list_orders")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="adm_back")],
+    ])
+
+
+def order_reply_kb(order_id: int, user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✉️ Написать покупателю", callback_data=f"adm_reply_{order_id}_{user_id}")]
     ])
 
 
@@ -85,6 +104,7 @@ def edit_product_fields_kb(product_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📄 Описание", callback_data=f"adm_edit_desc_{product_id}")],
         [InlineKeyboardButton(text="💰 Цена", callback_data=f"adm_edit_price_{product_id}")],
         [InlineKeyboardButton(text="🔄 Наличие (вкл/выкл)", callback_data=f"adm_toggle_stock_{product_id}")],
+        [InlineKeyboardButton(text="📁 Папка с фото", callback_data=f"adm_edit_folder_{product_id}")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="adm_products")],
     ])
 

@@ -2,6 +2,8 @@ from .start import router as start_router
 from .catalog import router as catalog_router
 from .search import router as search_router
 from .reviews import router as reviews_router
+from .favorites import router as favorites_router
+from .orders import router as orders_router
 from .admin.admin_main import router as admin_main_router
 from .admin.admin_products import router as admin_products_router
 from .admin.admin_categories import router as admin_categories_router
@@ -13,6 +15,8 @@ __all__ = [
     "catalog_router",
     "search_router",
     "reviews_router",
+    "favorites_router",
+    "orders_router",
     "admin_main_router",
     "admin_products_router",
     "admin_categories_router",

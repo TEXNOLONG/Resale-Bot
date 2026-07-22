@@ -50,7 +50,9 @@ async def init_db():
             category_id INT REFERENCES categories(id) ON DELETE SET NULL,
             in_stock BOOLEAN NOT NULL DEFAULT TRUE,
             views INT NOT NULL DEFAULT 0,
-            photos TEXT[] NOT NULL DEFAULT '{}'
+            photos TEXT[] NOT NULL DEFAULT '{}',
+            photo_folder TEXT NOT NULL DEFAULT '',
+            seed_folder TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS reviews (
@@ -70,7 +72,33 @@ async def init_db():
             user_id BIGINT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+
+        CREATE TABLE IF NOT EXISTS favorites (
+            user_id BIGINT NOT NULL,
+            product_id INT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+            PRIMARY KEY (user_id, product_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS orders (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            username TEXT NOT NULL DEFAULT '',
+            first_name TEXT NOT NULL DEFAULT '',
+            product_id INT REFERENCES products(id) ON DELETE SET NULL,
+            product_name TEXT NOT NULL,
+            product_price NUMERIC(12,2) NOT NULL DEFAULT 0,
+            comment TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'new',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
     """)
+
+    # Миграции для существующих таблиц
+    for sql in [
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS photo_folder TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE products ADD COLUMN IF NOT EXISTS seed_folder TEXT NOT NULL DEFAULT ''",
+    ]:
+        await pool.execute(sql)
 
 
 # ─── Settings ──────────────────────────────────────────────────────────────
@@ -174,23 +202,26 @@ async def get_product(product_id: int):
 async def search_products(query: str) -> list:
     pool = await get_pool()
     return await pool.fetch(
-        "SELECT p.*, c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id WHERE (LOWER(p.name) LIKE $1 OR LOWER(p.description) LIKE $1) AND p.in_stock=TRUE ORDER BY p.id DESC",
+        "SELECT p.*, c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id "
+        "WHERE (LOWER(p.name) LIKE $1 OR LOWER(p.description) LIKE $1) AND p.in_stock=TRUE ORDER BY p.id DESC",
         f"%{query.lower()}%"
     )
 
 
-async def add_product(category_id: int, name: str, description: str, price: float, photos: list) -> int:
+async def add_product(category_id: int, name: str, description: str, price: float,
+                      photos: list, photo_folder: str = "") -> int:
     pool = await get_pool()
     row = await pool.fetchrow(
-        "INSERT INTO products (category_id, name, description, price, photos) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-        category_id, name, description, price, photos
+        "INSERT INTO products (category_id, name, description, price, photos, photo_folder) "
+        "VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+        category_id, name, description, price, photos, photo_folder
     )
     return row["id"]
 
 
 async def update_product(product_id: int, field: str, value):
     pool = await get_pool()
-    allowed = {"name", "description", "price", "in_stock"}
+    allowed = {"name", "description", "price", "in_stock", "photo_folder", "seed_folder"}
     if field not in allowed:
         raise ValueError(f"Field {field} not allowed")
     await pool.execute(f"UPDATE products SET {field}=$1 WHERE id=$2", value, product_id)
@@ -280,4 +311,76 @@ async def get_top_clicked_products(limit: int = 10) -> list:
 async def get_total_clicks() -> int:
     pool = await get_pool()
     row = await pool.fetchrow("SELECT COUNT(*) as cnt FROM product_clicks")
+    return row["cnt"]
+
+
+# ─── Favorites ─────────────────────────────────────────────────────────────
+
+async def add_favorite(user_id: int, product_id: int):
+    pool = await get_pool()
+    await pool.execute(
+        "INSERT INTO favorites (user_id, product_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        user_id, product_id
+    )
+
+
+async def remove_favorite(user_id: int, product_id: int):
+    pool = await get_pool()
+    await pool.execute(
+        "DELETE FROM favorites WHERE user_id=$1 AND product_id=$2",
+        user_id, product_id
+    )
+
+
+async def is_favorite(user_id: int, product_id: int) -> bool:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT 1 FROM favorites WHERE user_id=$1 AND product_id=$2",
+        user_id, product_id
+    )
+    return row is not None
+
+
+async def get_user_favorites(user_id: int) -> list:
+    pool = await get_pool()
+    return await pool.fetch(
+        """SELECT p.*, c.name as cat_name
+           FROM favorites f
+           JOIN products p ON f.product_id = p.id
+           LEFT JOIN categories c ON p.category_id = c.id
+           WHERE f.user_id = $1
+           ORDER BY f.product_id DESC""",
+        user_id
+    )
+
+
+# ─── Orders ────────────────────────────────────────────────────────────────
+
+async def create_order(user_id: int, username: str, first_name: str,
+                       product_id: int, product_name: str, product_price: float,
+                       comment: str = "") -> int:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """INSERT INTO orders (user_id, username, first_name, product_id, product_name, product_price, comment)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id""",
+        user_id, username, first_name, product_id, product_name, product_price, comment
+    )
+    return row["id"]
+
+
+async def get_orders(limit: int = 50) -> list:
+    pool = await get_pool()
+    return await pool.fetch(
+        "SELECT * FROM orders ORDER BY created_at DESC LIMIT $1", limit
+    )
+
+
+async def get_order(order_id: int):
+    pool = await get_pool()
+    return await pool.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
+
+
+async def get_orders_count() -> int:
+    pool = await get_pool()
+    row = await pool.fetchrow("SELECT COUNT(*) as cnt FROM orders")
     return row["cnt"]

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
@@ -12,6 +13,8 @@ from handlers import (
     catalog_router,
     search_router,
     reviews_router,
+    favorites_router,
+    orders_router,
     admin_main_router,
     admin_products_router,
     admin_categories_router,
@@ -19,9 +22,15 @@ from handlers import (
     admin_settings_router,
 )
 
+LOG_FILE = os.path.join(os.path.dirname(__file__), "bot.log")
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger(__name__)
 
@@ -30,18 +39,19 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Register routers (order matters — admin first for priority)
+    # Регистрация роутеров (порядок важен — admin первым)
     dp.include_router(admin_main_router)
     dp.include_router(admin_products_router)
     dp.include_router(admin_categories_router)
     dp.include_router(admin_stats_router)
     dp.include_router(admin_settings_router)
+    dp.include_router(orders_router)
+    dp.include_router(favorites_router)
     dp.include_router(start_router)
     dp.include_router(catalog_router)
     dp.include_router(search_router)
     dp.include_router(reviews_router)
 
-    # Initialize DB pool and schema
     await db.init_db()
     logger.info("Database initialized")
 
