@@ -14,7 +14,7 @@ async def send_main_menu(message: Message, edit: bool = False):
     welcome_photo = await db.get_setting("welcome_photo")
 
     if not welcome_text:
-        welcome_text = "Добро пожаловать! 🛍️\nВыберите нужный раздел:"
+        welcome_text = "Привет! Выберите нужный раздел:"
 
     kb = main_menu_kb()
 
@@ -65,7 +65,7 @@ async def cb_contacts(callback: CallbackQuery):
 
     from keyboards.main_kb import back_to_menu_kb
     await callback.message.edit_text(
-        f"📞 <b>Контакты</b>\n\n{contact_info}",
+        f"<b>Контакты</b>\n\n{contact_info}",
         reply_markup=back_to_menu_kb(),
         parse_mode="HTML"
     )

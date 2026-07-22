@@ -16,7 +16,7 @@ async def cb_search(callback: CallbackQuery, state: FSMContext):
     await state.set_state(SearchProduct.query)
     from keyboards.admin_kb import cancel_kb
     await callback.message.edit_text(
-        "🔍 <b>Поиск товаров</b>\n\nВведите название или ключевое слово:",
+        "<b>Поиск</b>\n\nВведите название или ключевое слово:",
         reply_markup=cancel_kb(back_cb="main_menu"),
         parse_mode="HTML"
     )
@@ -26,7 +26,7 @@ async def cb_search(callback: CallbackQuery, state: FSMContext):
 async def process_search(message: Message, state: FSMContext):
     query = message.text.strip()
     if len(query) < 2:
-        await message.answer("❗ Введите хотя бы 2 символа для поиска.")
+        await message.answer("Введите хотя бы 2 символа.")
         return
 
     await state.clear()
@@ -34,14 +34,14 @@ async def process_search(message: Message, state: FSMContext):
 
     if not products:
         await message.answer(
-            f"😔 По запросу «<b>{query}</b>» ничего не найдено.\n\nПопробуйте другой запрос.",
+            f"По запросу «<b>{query}</b>» ничего не нашлось.\n\nПопробуйте другое слово.",
             reply_markup=back_to_menu_kb(),
             parse_mode="HTML"
         )
         return
 
     await message.answer(
-        f"🔍 <b>Результаты поиска</b> по «{query}»\n\nНайдено: {len(products)} товаров:",
+        f"<b>Результаты по «{query}»</b>\n\nНайдено: {len(products)}:",
         reply_markup=search_results_kb(products),
         parse_mode="HTML"
     )

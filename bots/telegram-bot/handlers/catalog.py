@@ -17,13 +17,13 @@ async def cb_catalog(callback: CallbackQuery):
     if not categories:
         from keyboards.main_kb import back_to_menu_kb
         await callback.message.edit_text(
-            "😔 Категорий пока нет. Загляните позже!",
+            "Категорий пока нет. Зайдите позже.",
             reply_markup=back_to_menu_kb()
         )
         return
 
     await callback.message.edit_text(
-        "🗂 <b>Каталог товаров</b>\n\nВыберите категорию:",
+        "<b>Каталог</b>\n\nВыберите категорию:",
         reply_markup=categories_kb(categories),
         parse_mode="HTML"
     )
@@ -39,7 +39,7 @@ async def cb_category(callback: CallbackQuery):
     if not products:
         categories = await db.get_categories()
         await callback.message.edit_text(
-            f"😔 В категории <b>{category['name']}</b> пока нет товаров.",
+            f"В категории <b>{category['name']}</b> пока нет товаров.",
             reply_markup=categories_kb(categories),
             parse_mode="HTML"
         )
@@ -47,7 +47,7 @@ async def cb_category(callback: CallbackQuery):
 
     cat_name = f"{category['emoji']} {category['name']}" if category else "Категория"
     await callback.message.edit_text(
-        f"<b>{cat_name}</b>\n\nДоступно товаров: {len(products)}\nВыберите товар:",
+        f"<b>{cat_name}</b>\n\nТоваров: {len(products)}\nВыберите:",
         reply_markup=products_list_kb(products, category_id),
         parse_mode="HTML"
     )
@@ -60,24 +60,22 @@ async def cb_product(callback: CallbackQuery):
     product = await db.get_product(product_id)
 
     if not product:
-        await callback.message.edit_text("❌ Товар не найден.")
+        await callback.message.edit_text("Товар не найден.")
         return
 
     await db.increment_views(product_id)
     await db.add_product_click(product_id, callback.from_user.id)
 
-    stock_text = "✅ В наличии" if product["in_stock"] else "❌ Нет в наличии"
-    cat_name = product.get("cat_name") or "Без категории"
+    stock_text = "В наличии" if product["in_stock"] else "Нет в наличии"
 
     text = (
-        f"📦 <b>{product['name']}</b>\n"
+        f"<b>{product['name']}</b>\n"
         f"━━━━━━━━━━━━━━\n"
-        f"🗂 Категория: {cat_name}\n"
-        f"💰 Цена: <b>{product['price']:,.0f} ₽</b>\n"
-        f"📊 Статус: {stock_text}\n"
+        f"Цена: <b>{product['price']:,.0f} ₽</b>\n"
+        f"Статус: {stock_text}\n"
     )
     if product["description"]:
-        text += f"\n📝 <b>Описание:</b>\n{product['description']}"
+        text += f"\n{product['description']}"
 
     kb = product_detail_kb(product_id, product["category_id"] or 0)
 
@@ -100,7 +98,7 @@ async def cb_product(callback: CallbackQuery):
             for i, photo in enumerate(photos[:10]):
                 media_group.add_photo(media=photo, caption=text if i == 0 else None, parse_mode="HTML" if i == 0 else None)
             await callback.message.answer_media_group(media=media_group.build())
-            await callback.message.answer("⬆️ Фото товара выше", reply_markup=kb)
+            await callback.message.answer("Фото выше ↑", reply_markup=kb)
         except Exception:
             await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     else:
@@ -118,10 +116,10 @@ async def cb_buy(callback: CallbackQuery):
 
     contact_info = await db.get_setting("contact_info")
     text = (
-        f"🛒 <b>Оформление заказа</b>\n\n"
+        f"<b>Оформление заказа</b>\n\n"
         f"Товар: <b>{product['name']}</b>\n"
         f"Цена: <b>{product['price']:,.0f} ₽</b>\n\n"
-        f"Для оформления заказа свяжитесь с нами:\n{contact_info}"
+        f"Напишите нам:\n{contact_info}"
     )
 
     kb = buy_kb(product_id)

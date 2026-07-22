@@ -23,7 +23,7 @@ def rating_kb():
             InlineKeyboardButton(text="⭐⭐⭐⭐", callback_data="rate_4"),
             InlineKeyboardButton(text="⭐⭐⭐⭐⭐", callback_data="rate_5"),
         ],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="main_menu")],
+        [InlineKeyboardButton(text="Отмена", callback_data="main_menu")],
     ])
 
 
@@ -32,13 +32,13 @@ def reviews_menu_kb(page: int = 0, total: int = 0):
     buttons = []
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"reviews_page_{page-1}"))
+        nav.append(InlineKeyboardButton(text="◀", callback_data=f"reviews_page_{page-1}"))
     if (page + 1) * 5 < total:
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"reviews_page_{page+1}"))
+        nav.append(InlineKeyboardButton(text="▶", callback_data=f"reviews_page_{page+1}"))
     if nav:
         buttons.append(nav)
-    buttons.append([InlineKeyboardButton(text="✍️ Оставить отзыв", callback_data="add_review")])
-    buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text="Написать отзыв", callback_data="add_review")])
+    buttons.append([InlineKeyboardButton(text="← Главное меню", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -63,18 +63,18 @@ async def show_reviews_page(callback: CallbackQuery, page: int):
 
     if not reviews and page == 0:
         await callback.message.edit_text(
-            "⭐ <b>Отзывы</b>\n\nПока нет отзывов. Будьте первым!",
+            "<b>Отзывы</b>\n\nПока нет ни одного отзыва. Будьте первым!",
             reply_markup=reviews_menu_kb(0, 0),
             parse_mode="HTML"
         )
         return
 
-    text = f"⭐ <b>Отзывы покупателей</b> (всего: {total})\n\n"
+    text = f"⭐ <b>Отзывы</b> (всего: {total})\n\n"
     for review in reviews:
         stars = STARS.get(review["rating"], "⭐")
         username = f"@{review['username']}" if review["username"] else "Покупатель"
         date = review["created_at"].strftime("%d.%m.%Y")
-        text += f"{stars} <b>{username}</b> • {date}\n{review['text']}\n\n"
+        text += f"{stars} <b>{username}</b> · {date}\n{review['text']}\n\n"
 
     await callback.message.edit_text(
         text.strip(),
@@ -89,10 +89,10 @@ async def cb_add_review(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AddReview.text)
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="reviews")]
+        [InlineKeyboardButton(text="Отмена", callback_data="reviews")]
     ])
     await callback.message.edit_text(
-        "✍️ <b>Написать отзыв</b>\n\nПоделитесь своим опытом покупки:",
+        "<b>Написать отзыв</b>\n\nРасскажите о покупке:",
         reply_markup=cancel_kb,
         parse_mode="HTML"
     )
@@ -103,7 +103,7 @@ async def process_review_text(message: Message, state: FSMContext):
     await state.update_data(text=message.text)
     await state.set_state(AddReview.rating)
     await message.answer(
-        "⭐ Оцените покупку:",
+        "Оцените покупку:",
         reply_markup=rating_kb()
     )
 
@@ -117,11 +117,11 @@ async def process_review_rating(callback: CallbackQuery, state: FSMContext):
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➡️ Без фото", callback_data="review_no_photo")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="reviews")],
+        [InlineKeyboardButton(text="Без фото →", callback_data="review_no_photo")],
+        [InlineKeyboardButton(text="Отмена", callback_data="reviews")],
     ])
     await callback.message.edit_text(
-        "📸 Прикрепите фото (необязательно) или нажмите «Без фото»:",
+        "Прикрепите фото (необязательно) или пропустите:",
         reply_markup=kb
     )
 
@@ -141,7 +141,7 @@ async def process_review_no_photo(callback: CallbackQuery, state: FSMContext):
         None
     )
     await callback.message.edit_text(
-        "✅ <b>Спасибо за отзыв!</b>\n\nОн появится после проверки модератором.",
+        "<b>Спасибо за отзыв!</b>\n\nПоявится после проверки.",
         reply_markup=back_to_menu_kb(),
         parse_mode="HTML"
     )
@@ -162,7 +162,7 @@ async def process_review_photo(message: Message, state: FSMContext):
         photo_file_id
     )
     await message.answer(
-        "✅ <b>Спасибо за отзыв!</b>\n\nОн появится после проверки модератором.",
+        "<b>Спасибо за отзыв!</b>\n\nПоявится после проверки.",
         reply_markup=back_to_menu_kb(),
         parse_mode="HTML"
     )
