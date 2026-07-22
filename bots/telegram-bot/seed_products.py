@@ -1,10 +1,11 @@
 """
-Скрипт для заполнения базы данных товарами из PDF.
+Скрипт для заполнения базы данных начальными товарами.
 Запускается один раз из папки bots/telegram-bot/
 
+Фото читаются с диска из папки seed_photos/ — никуда не отправляются.
+
 Требования:
-  - BOT_TOKEN и DATABASE_URL в .env или переменных окружения
-  - ADMIN_IDS — хотя бы один ID (в него будут отправлены фото для получения file_id)
+  - DATABASE_URL в .env или переменных окружения
 
 Запуск:
   cd bots/telegram-bot
@@ -15,27 +16,15 @@ import asyncio
 import os
 import sys
 
-from aiogram import Bot
-from aiogram.types import FSInputFile
 import asyncpg
 from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
-ADMIN_IDS_RAW = os.getenv("ADMIN_IDS", "")
 
-if not BOT_TOKEN:
-    sys.exit("ERROR: BOT_TOKEN не задан")
 if not DATABASE_URL:
     sys.exit("ERROR: DATABASE_URL не задан")
-
-admin_ids = [int(x.strip()) for x in ADMIN_IDS_RAW.split(",") if x.strip()]
-if not admin_ids:
-    sys.exit("ERROR: ADMIN_IDS не задан — нужен хотя бы один Telegram ID для загрузки фото")
-
-UPLOADER_CHAT_ID = admin_ids[0]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ЦЕНЫ — установите нужные значения перед запуском, потом можно поменять в боте
@@ -193,24 +182,9 @@ CATEGORY_EMOJIS = {
 }
 
 
-async def upload_photos(bot: Bot, folder: str) -> list[str]:
-    """Отправляет фото в чат админа и возвращает список file_id."""
-    photo_dir = os.path.join(PHOTOS_DIR, folder)
-    files = sorted(
-        f for f in os.listdir(photo_dir) if f.lower().endswith((".jpeg", ".jpg", ".png"))
-    )
-    file_ids = []
-    for fname in files:
-        fpath = os.path.join(photo_dir, fname)
-        msg = await bot.send_photo(
-            chat_id=UPLOADER_CHAT_ID,
-            photo=FSInputFile(fpath),
-            caption=f"[seed] {folder}/{fname}",
-        )
-        file_id = msg.photo[-1].file_id
-        file_ids.append(file_id)
-        print(f"    Загружено: {fname} -> {file_id[:30]}...")
-    return file_ids
+async def upload_photos(folder: str) -> list[str]:
+    """Устарело — теперь фото читаются с диска напрямую через seed_folder."""
+    return []
 
 
 async def get_or_create_category(pool: asyncpg.Pool, name: str) -> int:
@@ -233,7 +207,6 @@ async def product_exists(pool: asyncpg.Pool, name: str) -> bool:
 
 async def main():
     print("=== Seed: загрузка товаров ===\n")
-    bot = Bot(token=BOT_TOKEN)
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
 
     try:
@@ -247,21 +220,17 @@ async def main():
 
             cat_id = await get_or_create_category(pool, product["category"])
 
-            print(f"  Загрузка фото...")
-            photos = await upload_photos(bot, product["photos_dir"])
-            print(f"  Загружено фото: {len(photos)}")
-
             price = PRICES.get(name, 0)
+            seed_folder = product["photos_dir"]
             row = await pool.fetchrow(
-                """INSERT INTO products (category_id, name, description, price, photos)
-                   VALUES ($1, $2, $3, $4, $5) RETURNING id""",
-                cat_id, name, product["description"], float(price), photos,
+                """INSERT INTO products (category_id, name, description, price, photos, seed_folder)
+                   VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
+                cat_id, name, product["description"], float(price), [], seed_folder,
             )
-            print(f"  Добавлен товар id={row['id']}, цена={price} руб.\n")
+            print(f"  Добавлен товар id={row['id']}, seed_folder={seed_folder}, цена={price} руб.\n")
 
     finally:
         await pool.close()
-        await bot.session.close()
 
     print("=== Готово! ===")
     if any(v == 0 for v in PRICES.values()):

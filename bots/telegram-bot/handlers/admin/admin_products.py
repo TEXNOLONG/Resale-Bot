@@ -12,6 +12,7 @@ from keyboards.admin_kb import (
     edit_product_fields_kb, back_to_admin_kb, cancel_kb, confirm_delete_kb
 )
 from states.forms import AddProduct, EditProduct
+from utils import safe_edit_text
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ async def cb_adm_products(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer()
     await state.clear()
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         "📦 <b>Управление товарами</b>\n\nВыберите действие:",
         reply_markup=admin_products_kb(),
         parse_mode="HTML"
@@ -43,7 +44,7 @@ async def cb_adm_list_products(callback: CallbackQuery):
     await callback.answer()
     products = await db.get_all_products(include_out_of_stock=True)
     if not products:
-        await callback.message.edit_text("📦 Товаров пока нет.", reply_markup=admin_products_kb())
+        await safe_edit_text(callback.message, "📦 Товаров пока нет.", reply_markup=admin_products_kb())
         return
 
     text = "📦 <b>Все товары</b>\n\n"
@@ -52,7 +53,7 @@ async def cb_adm_list_products(callback: CallbackQuery):
         cat   = p.get("cat_name") or "Без категории"
         text += f"{stock} <b>{p['name']}</b>\n   💰 {p['price']:,.0f} ₽ | 📁 {cat} | 👁 {p['views']}\n\n"
 
-    await callback.message.edit_text(text, reply_markup=admin_products_kb(), parse_mode="HTML")
+    await safe_edit_text(callback.message, text, reply_markup=admin_products_kb(), parse_mode="HTML")
 
 
 # ─── Add Product ────────────────────────────────────────────────────────────
@@ -64,10 +65,10 @@ async def cb_adm_add_product(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     categories = await db.get_categories()
     if not categories:
-        await callback.message.edit_text("❌ Сначала добавьте категорию!", reply_markup=back_to_admin_kb())
+        await safe_edit_text(callback.message, "❌ Сначала добавьте категорию!", reply_markup=back_to_admin_kb())
         return
     await state.set_state(AddProduct.category)
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         "➕ <b>Добавление товара</b>\n\nВыберите категорию:",
         reply_markup=categories_select_kb(categories, prefix="adm_selcat"),
         parse_mode="HTML"
@@ -82,7 +83,7 @@ async def cb_adm_selcat(callback: CallbackQuery, state: FSMContext):
     category_id = int(callback.data.split("_")[2])
     await state.update_data(category_id=category_id)
     await state.set_state(AddProduct.name)
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         "📝 Введите <b>название</b> товара:",
         reply_markup=cancel_kb("adm_products"),
         parse_mode="HTML"
@@ -110,7 +111,7 @@ async def cb_skip_desc(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.update_data(description="")
     await state.set_state(AddProduct.price)
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         "💰 Введите <b>цену</b> товара (например: 5990):",
         reply_markup=cancel_kb("adm_products"),
         parse_mode="HTML"
@@ -213,7 +214,7 @@ async def cb_finish_photos(callback: CallbackQuery, state: FSMContext):
             except Exception as e:
                 logger.error(f"Ошибка скачивания фото: {e}")
 
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         f"✅ <b>Товар добавлен!</b>\n\nID: {product_id}\nНазвание: {data.get('name')}\n"
         f"Цена: {data.get('price'):,.0f} ₽\nФото: {len(pending_photos)} шт.",
         reply_markup=admin_products_kb(),
@@ -230,10 +231,10 @@ async def cb_adm_edit_product(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     products = await db.get_all_products(include_out_of_stock=True)
     if not products:
-        await callback.message.edit_text("📦 Нет товаров для редактирования.", reply_markup=admin_products_kb())
+        await safe_edit_text(callback.message, "📦 Нет товаров для редактирования.", reply_markup=admin_products_kb())
         return
     await state.set_state(EditProduct.select)
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         "✏️ <b>Выберите товар для редактирования:</b>",
         reply_markup=products_select_kb(products, "adm_editprod"),
         parse_mode="HTML"
@@ -259,7 +260,7 @@ async def cb_select_edit_product(callback: CallbackQuery, state: FSMContext):
         f"📁 Папка фото: {folder}\n\n"
         f"Что изменить?"
     )
-    await callback.message.edit_text(text, reply_markup=edit_product_fields_kb(product_id), parse_mode="HTML")
+    await safe_edit_text(callback.message, text, reply_markup=edit_product_fields_kb(product_id), parse_mode="HTML")
 
 
 @router.callback_query(EditProduct.field, F.data.startswith("adm_edit_name_"))
@@ -269,7 +270,7 @@ async def cb_edit_name(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.update_data(field="name")
     await state.set_state(EditProduct.value)
-    await callback.message.edit_text("📝 Введите новое название:", reply_markup=cancel_kb("adm_products"))
+    await safe_edit_text(callback.message, "📝 Введите новое название:", reply_markup=cancel_kb("adm_products"))
 
 
 @router.callback_query(EditProduct.field, F.data.startswith("adm_edit_desc_"))
@@ -279,7 +280,7 @@ async def cb_edit_desc(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.update_data(field="description")
     await state.set_state(EditProduct.value)
-    await callback.message.edit_text("📄 Введите новое описание:", reply_markup=cancel_kb("adm_products"))
+    await safe_edit_text(callback.message, "📄 Введите новое описание:", reply_markup=cancel_kb("adm_products"))
 
 
 @router.callback_query(EditProduct.field, F.data.startswith("adm_edit_price_"))
@@ -289,7 +290,7 @@ async def cb_edit_price(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.update_data(field="price")
     await state.set_state(EditProduct.value)
-    await callback.message.edit_text("💰 Введите новую цену (число):", reply_markup=cancel_kb("adm_products"))
+    await safe_edit_text(callback.message, "💰 Введите новую цену (число):", reply_markup=cancel_kb("adm_products"))
 
 
 @router.callback_query(EditProduct.field, F.data.startswith("adm_edit_folder_"))
@@ -301,7 +302,7 @@ async def cb_edit_folder(callback: CallbackQuery, state: FSMContext):
     await state.update_data(field="photo_folder", product_id=product_id)
     await state.set_state(EditProduct.value)
     from photos import PRODUCT_PHOTOS_DIR, SEED_PHOTOS_DIR
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         "📁 Введите путь к папке с фото товара.\n\n"
         f"Папки товаров: <code>{PRODUCT_PHOTOS_DIR}/prod_&lt;id&gt;/</code>\n"
         f"Seed-фото: <code>{SEED_PHOTOS_DIR}/&lt;папка&gt;/</code>\n\n"
@@ -322,7 +323,7 @@ async def cb_toggle_stock(callback: CallbackQuery, state: FSMContext):
     await db.update_product(product_id, "in_stock", new_stock)
     status = "✅ В наличии" if new_stock else "❌ Нет в наличии"
     await state.clear()
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         f"🔄 Статус <b>{product['name']}</b> изменён: {status}",
         reply_markup=admin_products_kb(),
         parse_mode="HTML"
@@ -373,9 +374,9 @@ async def cb_adm_del_product(callback: CallbackQuery):
     await callback.answer()
     products = await db.get_all_products(include_out_of_stock=True)
     if not products:
-        await callback.message.edit_text("📦 Нет товаров для удаления.", reply_markup=admin_products_kb())
+        await safe_edit_text(callback.message, "📦 Нет товаров для удаления.", reply_markup=admin_products_kb())
         return
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         "🗑 <b>Выберите товар для удаления:</b>",
         reply_markup=products_select_kb(products, "adm_delprod"),
         parse_mode="HTML"
@@ -389,7 +390,7 @@ async def cb_select_del_product(callback: CallbackQuery):
     await callback.answer()
     product_id = int(callback.data.split("_")[2])
     product    = await db.get_product(product_id)
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         f"⚠️ Удалить товар <b>{product['name']}</b>?\nЦена: {product['price']:,.0f} ₽",
         reply_markup=confirm_delete_kb(product_id, "prod"),
         parse_mode="HTML"
@@ -403,4 +404,4 @@ async def cb_confirm_del_product(callback: CallbackQuery):
     await callback.answer()
     product_id = int(callback.data.split("_")[4])
     await db.delete_product(product_id)
-    await callback.message.edit_text("✅ Товар удалён.", reply_markup=admin_products_kb())
+    await safe_edit_text(callback.message, "✅ Товар удалён.", reply_markup=admin_products_kb())

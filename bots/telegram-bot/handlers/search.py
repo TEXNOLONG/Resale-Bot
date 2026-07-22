@@ -15,11 +15,16 @@ async def cb_search(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state(SearchProduct.query)
     from keyboards.admin_kb import cancel_kb
-    await callback.message.edit_text(
-        "<b>Поиск</b>\n\nВведите название или ключевое слово:",
-        reply_markup=cancel_kb(back_cb="main_menu"),
-        parse_mode="HTML"
-    )
+    text = "<b>Поиск</b>\n\nВведите название или ключевое слово:"
+    kb = cancel_kb(back_cb="main_menu")
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(SearchProduct.query)

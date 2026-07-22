@@ -12,7 +12,7 @@ router = Router()
 
 # ─── Начало оформления заказа ────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("order_"))
+@router.callback_query(F.data.regexp(r'^order_\d+$'))
 async def cb_order_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     product_id = int(callback.data.split("_")[1])

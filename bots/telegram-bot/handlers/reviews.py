@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 import database as db
 from keyboards.main_kb import back_to_menu_kb
 from states.forms import AddReview
+from utils import safe_edit_text
 
 router = Router()
 
@@ -66,7 +67,7 @@ async def show_reviews_page(callback: CallbackQuery, page: int):
 
     if not reviews and page == 0:
         try:
-            await callback.message.edit_text(
+            await safe_edit_text(callback.message, 
                 "<b>Отзывы</b>\n\nПока нет ни одного отзыва. Будьте первым!",
                 reply_markup=reviews_menu_kb(0, 0, channel_url),
                 parse_mode="HTML"
@@ -87,7 +88,7 @@ async def show_reviews_page(callback: CallbackQuery, page: int):
         text    += f"{stars} <b>{username}</b> · {date}\n{review['text']}\n\n"
 
     try:
-        await callback.message.edit_text(
+        await safe_edit_text(callback.message, 
             text.strip(),
             reply_markup=reviews_menu_kb(page, total, channel_url),
             parse_mode="HTML"
@@ -107,11 +108,15 @@ async def cb_add_review(callback: CallbackQuery, state: FSMContext):
     cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Отмена", callback_data="reviews")]
     ])
-    await callback.message.edit_text(
-        "<b>Написать отзыв</b>\n\nРасскажите о покупке:",
-        reply_markup=cancel_kb,
-        parse_mode="HTML"
-    )
+    text = "<b>Написать отзыв</b>\n\nРасскажите о покупке:"
+    try:
+        await safe_edit_text(callback.message, text, reply_markup=cancel_kb, parse_mode="HTML")
+    except Exception:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(text, reply_markup=cancel_kb, parse_mode="HTML")
 
 
 @router.message(AddReview.text)
@@ -131,9 +136,18 @@ async def process_review_rating(callback: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="Без фото →", callback_data="review_no_photo")],
         [InlineKeyboardButton(text="Отмена", callback_data="reviews")],
     ])
-    await callback.message.edit_text(
-        "Прикрепите фото (необязательно) или пропустите:", reply_markup=kb
-    )
+    try:
+        await safe_edit_text(callback.message, 
+            "Прикрепите фото (необязательно) или пропустите:", reply_markup=kb
+        )
+    except Exception:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(
+            "Прикрепите фото (необязательно) или пропустите:", reply_markup=kb
+        )
 
 
 @router.callback_query(AddReview.photo, F.data == "review_no_photo")
@@ -143,11 +157,22 @@ async def process_review_no_photo(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     user = callback.from_user
     await db.add_review(user.id, user.username or "", data["text"], data["rating"], None)
-    await callback.message.edit_text(
-        "<b>Спасибо за отзыв!</b>\n\nПоявится после проверки.",
-        reply_markup=back_to_menu_kb(),
-        parse_mode="HTML"
-    )
+    try:
+        await safe_edit_text(callback.message, 
+            "<b>Спасибо за отзыв!</b>\n\nПоявится после проверки.",
+            reply_markup=back_to_menu_kb(),
+            parse_mode="HTML"
+        )
+    except Exception:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(
+            "<b>Спасибо за отзыв!</b>\n\nПоявится после проверки.",
+            reply_markup=back_to_menu_kb(),
+            parse_mode="HTML"
+        )
 
 
 @router.message(AddReview.photo, F.photo)

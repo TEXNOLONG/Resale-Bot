@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 import database as db
 from config import ADMIN_IDS
 from keyboards.admin_kb import admin_main_kb, admin_orders_kb
+from utils import safe_edit_text
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ async def _send_admin_menu(message: Message):
     products = await db.get_all_products(include_out_of_stock=True)
     pending  = await db.get_pending_reviews()
     orders   = await db.get_orders_count()
+    admin_photo = await db.get_setting("admin_photo")
 
     text = (
         f"🔧 <b>Панель администратора</b>\n\n"
@@ -42,7 +44,10 @@ async def _send_admin_menu(message: Message):
         f"⏳ Отзывов на модерации: {len(pending)}\n\n"
         f"Выберите раздел:"
     )
-    await message.answer(text, reply_markup=admin_main_kb(), parse_mode="HTML")
+    if admin_photo:
+        await message.answer_photo(admin_photo, caption=text, reply_markup=admin_main_kb(), parse_mode="HTML")
+    else:
+        await message.answer(text, reply_markup=admin_main_kb(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "adm_back")
@@ -57,6 +62,7 @@ async def cb_adm_back(callback: CallbackQuery, state: FSMContext):
     products = await db.get_all_products(include_out_of_stock=True)
     pending  = await db.get_pending_reviews()
     orders   = await db.get_orders_count()
+    admin_photo = await db.get_setting("admin_photo")
 
     text = (
         f"🔧 <b>Панель администратора</b>\n\n"
@@ -66,10 +72,17 @@ async def cb_adm_back(callback: CallbackQuery, state: FSMContext):
         f"⏳ Отзывов на модерации: {len(pending)}\n\n"
         f"Выберите раздел:"
     )
-    try:
-        await callback.message.edit_text(text, reply_markup=admin_main_kb(), parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(text, reply_markup=admin_main_kb(), parse_mode="HTML")
+    if admin_photo:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer_photo(admin_photo, caption=text, reply_markup=admin_main_kb(), parse_mode="HTML")
+    else:
+        try:
+            await safe_edit_text(callback.message, text, reply_markup=admin_main_kb(), parse_mode="HTML")
+        except Exception:
+            await callback.message.answer(text, reply_markup=admin_main_kb(), parse_mode="HTML")
 
 
 # ─── Заказы ──────────────────────────────────────────────────────────────────
@@ -80,7 +93,7 @@ async def cb_adm_orders(callback: CallbackQuery):
         return
     await callback.answer()
     orders = await db.get_orders_count()
-    await callback.message.edit_text(
+    await safe_edit_text(callback.message, 
         f"🛒 <b>Заказы</b>\n\nВсего заказов: {orders}",
         reply_markup=admin_orders_kb(),
         parse_mode="HTML"
@@ -95,7 +108,7 @@ async def cb_list_orders(callback: CallbackQuery):
     orders = await db.get_orders(limit=20)
 
     if not orders:
-        await callback.message.edit_text("📭 Заказов пока нет.", reply_markup=admin_orders_kb())
+        await safe_edit_text(callback.message, "📭 Заказов пока нет.", reply_markup=admin_orders_kb())
         return
 
     text = "🛒 <b>Последние заказы</b>\n\n"
@@ -115,7 +128,7 @@ async def cb_list_orders(callback: CallbackQuery):
     if len(text) > 4000:
         text = text[:4000] + "…"
 
-    await callback.message.edit_text(text, reply_markup=admin_orders_kb(), parse_mode="HTML")
+    await safe_edit_text(callback.message, text, reply_markup=admin_orders_kb(), parse_mode="HTML")
 
 
 # ─── Логи ─────────────────────────────────────────────────────────────────────

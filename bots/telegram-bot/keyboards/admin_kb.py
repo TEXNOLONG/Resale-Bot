@@ -18,6 +18,9 @@ def admin_main_kb() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="📋 Скачать логи", callback_data="adm_logs"),
         ],
+        [
+            InlineKeyboardButton(text="🏠 Вернуться в бот", callback_data="main_menu"),
+        ],
     ])
 
 
@@ -51,8 +54,10 @@ def admin_settings_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🖼 Приветственное фото", callback_data="adm_set_photo")],
         [InlineKeyboardButton(text="📝 Приветственный текст", callback_data="adm_set_welcome_text")],
+        [InlineKeyboardButton(text="🔧 Фото панели администратора", callback_data="adm_set_admin_photo")],
         [InlineKeyboardButton(text="📞 Контакты", callback_data="adm_set_contact")],
         [InlineKeyboardButton(text="ℹ️ Текст «О нас»", callback_data="adm_set_about")],
+        [InlineKeyboardButton(text="🖼 Фото «О нас»", callback_data="adm_set_about_photo")],
         [InlineKeyboardButton(text="📢 Канал с отзывами", callback_data="adm_set_reviews_channel")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="adm_back")],
     ])

@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 
 import database as db
 from keyboards.main_kb import main_menu_kb, back_to_menu_kb
+from utils import safe_edit_text
 
 router = Router()
 
@@ -19,13 +20,13 @@ async def send_main_menu(message: Message, edit: bool = False):
     kb = main_menu_kb()
 
     if welcome_photo:
+        # Всегда удаляем старое сообщение и отправляем новое с фото
         if edit:
             try:
-                await message.edit_text(welcome_text, reply_markup=kb)
+                await message.delete()
             except Exception:
-                await message.answer_photo(welcome_photo, caption=welcome_text, reply_markup=kb)
-        else:
-            await message.answer_photo(welcome_photo, caption=welcome_text, reply_markup=kb)
+                pass
+        await message.answer_photo(welcome_photo, caption=welcome_text, reply_markup=kb)
     else:
         if edit:
             try:
@@ -62,27 +63,45 @@ async def cb_contacts(callback: CallbackQuery):
     contact_info = await db.get_setting("contact_info")
     if not contact_info:
         contact_info = "Контакты не указаны"
-    await callback.message.edit_text(
-        f"<b>Контакты</b>\n\n{contact_info}",
-        reply_markup=back_to_menu_kb(),
-        parse_mode="HTML"
-    )
+    text = f"<b>Контакты</b>\n\n{contact_info}"
+    try:
+        await safe_edit_text(callback.message, text, reply_markup=back_to_menu_kb(), parse_mode="HTML")
+    except Exception:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(text, reply_markup=back_to_menu_kb(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "about_us")
 async def cb_about_us(callback: CallbackQuery):
     await callback.answer()
     about_text = await db.get_setting("about_us_text")
+    about_photo = await db.get_setting("about_us_photo")
     if not about_text:
         about_text = (
             "Мы — магазин качественной одежды и аксессуаров.\n\n"
             "Чтобы добавить текст «О нас», перейдите в Настройки в панели администратора."
         )
-    await callback.message.edit_text(
-        f"ℹ️ <b>О нас</b>\n\n{about_text}",
-        reply_markup=back_to_menu_kb(),
-        parse_mode="HTML"
-    )
+    full_text = f"ℹ️ <b>О нас</b>\n\n{about_text}"
+    if about_photo:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer_photo(
+            about_photo,
+            caption=full_text,
+            reply_markup=back_to_menu_kb(),
+            parse_mode="HTML"
+        )
+    else:
+        await safe_edit_text(callback.message, 
+            full_text,
+            reply_markup=back_to_menu_kb(),
+            parse_mode="HTML"
+        )
 
 
 @router.callback_query(F.data == "noop")

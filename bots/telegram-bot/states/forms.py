@@ -36,6 +36,14 @@ class SetWelcome(StatesGroup):
     text = State()
 
 
+class SetAdminPhoto(StatesGroup):
+    photo = State()
+
+
+class SetAboutPhoto(StatesGroup):
+    photo = State()
+
+
 class SetContact(StatesGroup):
     text = State()
 

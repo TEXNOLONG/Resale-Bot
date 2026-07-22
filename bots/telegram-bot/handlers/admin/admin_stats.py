@@ -4,6 +4,7 @@ from aiogram.types import CallbackQuery
 import database as db
 from config import ADMIN_IDS
 from keyboards.admin_kb import back_to_admin_kb
+from utils import safe_edit_text
 
 router = Router()
 
@@ -47,4 +48,4 @@ async def cb_adm_stats(callback: CallbackQuery):
         for i, p in enumerate(top_clicks, 1):
             text += f"{i}. {p['name']} — {p['clicks']} кликов\n"
 
-    await callback.message.edit_text(text, reply_markup=back_to_admin_kb(), parse_mode="HTML")
+    await safe_edit_text(callback.message, text, reply_markup=back_to_admin_kb(), parse_mode="HTML")
