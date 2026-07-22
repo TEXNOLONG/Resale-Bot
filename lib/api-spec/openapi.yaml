@@ -1,22 +1,22 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: veachelsell shop API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: catalog
+    description: Shop catalog operations
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +24,114 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /catalog/categories:
+    get:
+      operationId: listCategories
+      tags: [catalog]
+      summary: List all categories
+      responses:
+        "200":
+          description: Categories list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+
+  /catalog/products:
+    get:
+      operationId: listProducts
+      tags: [catalog]
+      summary: List products, optionally filtered by category or search query
+      parameters:
+        - name: category_id
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: q
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: Products list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+
+  /catalog/products/{id}:
+    get:
+      operationId: getProduct
+      tags: [catalog]
+      summary: Get a single product by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Product detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /catalog/photo:
+    get:
+      operationId: getPhoto
+      tags: [catalog]
+      summary: Proxy a Telegram file_id to a real image URL (redirects)
+      parameters:
+        - name: file_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to Telegram CDN image
+        "400":
+          description: Bad request
+
+  /catalog/settings:
+    get:
+      operationId: getShopSettings
+      tags: [catalog]
+      summary: Get shop display settings
+      responses:
+        "200":
+          description: Shop settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShopSettings"
+
+  /catalog/stats:
+    get:
+      operationId: getCatalogStats
+      tags: [catalog]
+      summary: Catalog summary stats (counts, top product)
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogStats"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +139,75 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    Category:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        emoji:
+          type: string
+        order_num:
+          type: integer
+        product_count:
+          type: integer
+      required: [id, name, emoji, order_num, product_count]
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        category_id:
+          type: ["integer", "null"]
+        category_name:
+          type: ["string", "null"]
+        in_stock:
+          type: boolean
+        views:
+          type: integer
+        photos:
+          type: array
+          items:
+            type: string
+      required: [id, name, description, price, category_id, category_name, in_stock, views, photos]
+
+    ShopSettings:
+      type: object
+      properties:
+        shop_name:
+          type: string
+        welcome_text:
+          type: string
+        contact_info:
+          type: string
+        welcome_photo:
+          type: ["string", "null"]
+      required: [shop_name, welcome_text, contact_info, welcome_photo]
+
+    CatalogStats:
+      type: object
+      properties:
+        total_products:
+          type: integer
+        total_categories:
+          type: integer
+        top_product:
+          $ref: "#/components/schemas/Product"
+      required: [total_products, total_categories]

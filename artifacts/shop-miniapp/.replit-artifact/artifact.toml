@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "veachelsell Mini App"
+version = "1.0.0"
+id = "artifacts/shop-miniapp"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18405
+
+[services.development]
+run = "pnpm --filter @workspace/shop-miniapp run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/shop-miniapp", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/shop-miniapp/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18405"
+BASE_PATH = "/"
