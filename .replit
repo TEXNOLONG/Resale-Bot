@@ -47,4 +47,3 @@ SHOP_NAME = "veachelsell"
 
 [nix]
 channel = "stable-25_05"
-packages = ["postgresql"]

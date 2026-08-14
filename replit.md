@@ -5,7 +5,7 @@ Telegram-бот для ресейл-магазина veachelsell: каталог
 ## Запуск
 
 - Workflow **Telegram Bot**: `cd bots/telegram-bot && python3.11 main.py`
-- VPS/локальный запуск: `./run_bot.sh` — при первом запуске создаёт `bots/telegram-bot/.venv`, устанавливает зависимости и запрашивает `BOT_TOKEN` и `DATABASE_URL` скрытым вводом. Значения не сохраняются в файлы.
+- VPS/локальный запуск: `./run_bot.sh` — при первом запуске создаёт `bots/telegram-bot/.venv`, устанавливает зависимости и запрашивает `BOT_TOKEN` скрытым вводом. Данные магазина сохраняются в `bots/telegram-bot/data/store.json`.
 - Логи пишутся в `bots/telegram-bot/bot.log` (можно скачать через `/admin` → «Скачать логи»)
 
 ## Секреты и переменные
@@ -13,7 +13,6 @@ Telegram-бот для ресейл-магазина veachelsell: каталог
 | Ключ | Где задать | Описание |
 |---|---|---|
 | `BOT_TOKEN` | Replit Secrets | Токен бота от @BotFather |
-| `DATABASE_URL` | авто (Replit) | PostgreSQL — задаётся автоматически |
 | `ADMIN_IDS` | Secrets / config.py | Telegram ID администраторов (через запятую) |
 | `SHOP_NAME` | env var / config.py | Название магазина |
 
@@ -29,8 +28,7 @@ Telegram-бот для ресейл-магазина veachelsell: каталог
 ## Stack
 
 - Python 3.11 + **aiogram 3.x** (FSM, Routers)
-- **asyncpg** — прямые запросы к PostgreSQL
-- PostgreSQL (Replit managed) — схема инициализируется автоматически при старте
+- JSON-файл — `bots/telegram-bot/data/store.json`, создаётся автоматически при старте
 
 ## Структура файлов
 
@@ -102,7 +100,7 @@ bots/telegram-bot/
 
 ## Заполнение товаров (первый запуск)
 
-`seed_products.py` **больше не нужно запускать** — он отправлял все фото в чат для получения file_id, что было багом. Теперь бот читает фото с диска напрямую.
+`seed_products.py` **больше не нужно запускать** — при первом старте JSON-хранилища каталог создаётся автоматически, а фото читаются с диска напрямую.
 
 Для существующих seed-товаров: через `/admin` → Товары → Редактировать → Папка с фото — укажи путь `seed_photos/1_hoodie_print` и т.д.
 

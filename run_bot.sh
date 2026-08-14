@@ -34,7 +34,7 @@ if [[ ! -x "$VENV_DIR/bin/python" ]]; then
 fi
 
 PYTHON="$VENV_DIR/bin/python"
-if ! "$PYTHON" -c "import aiogram, asyncpg, dotenv" >/dev/null 2>&1; then
+if ! "$PYTHON" -c "import aiogram, dotenv" >/dev/null 2>&1; then
     echo "Устанавливаю зависимости бота..."
     PIP_USER=0 "$PYTHON" -m pip install --disable-pip-version-check --upgrade pip
     PIP_USER=0 "$PYTHON" -m pip install --disable-pip-version-check --no-user -r "$BOT_DIR/requirements.txt"
@@ -47,20 +47,6 @@ if [[ -z "${BOT_TOKEN:-}" ]]; then
 fi
 if [[ ! "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
     echo "Ошибка: BOT_TOKEN выглядит некорректно." >&2
-    exit 1
-fi
-
-if [[ -z "${DATABASE_URL:-}" ]]; then
-    printf "Введите DATABASE_URL PostgreSQL (ввод скрыт): "
-    read -r -s DATABASE_URL
-    printf "\n"
-fi
-if [[ -z "$DATABASE_URL" ]]; then
-    echo "Ошибка: DATABASE_URL не может быть пустым." >&2
-    exit 1
-fi
-if [[ ! "$DATABASE_URL" =~ ^postgres(ql)?:// ]]; then
-    echo "Ошибка: DATABASE_URL должен начинаться с postgres:// или postgresql://." >&2
     exit 1
 fi
 
@@ -78,6 +64,6 @@ if [[ -z "${SHOP_NAME:-}" ]]; then
     SHOP_NAME="${SHOP_NAME:-veachelsell}"
 fi
 
-export BOT_TOKEN DATABASE_URL ADMIN_IDS SHOP_NAME
+export BOT_TOKEN ADMIN_IDS SHOP_NAME
 cd "$BOT_DIR"
 exec "$PYTHON" main.py

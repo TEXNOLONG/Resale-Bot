@@ -1,386 +1,656 @@
-import asyncpg
-from config import DATABASE_URL
+"""
+Локальное JSON-хранилище магазина.
 
-_pool: asyncpg.Pool = None
+Файл данных: bots/telegram-bot/data/store.json
+JSON выбран для запуска на небольшом VPS без отдельного PostgreSQL-сервера.
+Все публичные функции оставляют прежний async-интерфейс, поэтому обработчики
+бота не зависят от способа хранения данных.
+"""
+
+import asyncio
+import json
+import os
+import tempfile
+from datetime import date, datetime, timezone
+from typing import Any
 
 
-async def get_pool() -> asyncpg.Pool:
-    global _pool
-    if _pool is None:
-        _pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-    return _pool
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+DATA_FILE = os.path.join(DATA_DIR, "store.json")
+
+_store: dict[str, Any] | None = None
+_lock = asyncio.Lock()
+
+_COLLECTIONS = (
+    "users",
+    "categories",
+    "products",
+    "reviews",
+    "product_clicks",
+    "favorites",
+    "orders",
+)
+_COUNTER_NAMES = (
+    "users",
+    "categories",
+    "products",
+    "reviews",
+    "product_clicks",
+    "orders",
+)
+_DATE_FIELDS = ("created_at",)
 
 
-async def close_pool():
-    global _pool
-    if _pool:
-        await _pool.close()
-        _pool = None
+def _empty_store() -> dict[str, Any]:
+    return {
+        "settings": {},
+        **{name: [] for name in _COLLECTIONS},
+        "counters": {name: 0 for name in _COUNTER_NAMES},
+    }
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _as_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _public(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    result = dict(row)
+    for field in _DATE_FIELDS:
+        if field in result:
+            result[field] = _as_datetime(result[field])
+    return result
+
+
+def _public_many(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [_public(row) for row in rows]
+
+
+def _state() -> dict[str, Any]:
+    if _store is None:
+        raise RuntimeError("JSON-хранилище ещё не инициализировано")
+    return _store
+
+
+def _next_id_locked(collection: str) -> int:
+    store = _state()
+    store["counters"][collection] = int(store["counters"].get(collection, 0)) + 1
+    return store["counters"][collection]
+
+
+def _save_locked() -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix="store-", suffix=".json", dir=DATA_DIR)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump(_state(), file, ensure_ascii=False, indent=2)
+            file.write("\n")
+            file.flush()
+            os.fsync(file.fileno())
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, DATA_FILE)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def _category_name_locked(category_id: int | None) -> str | None:
+    if category_id is None:
+        return None
+    for category in _state()["categories"]:
+        if category["id"] == category_id:
+            return category["name"]
+    return None
+
+
+def _product_view_locked(product: dict[str, Any]) -> dict[str, Any]:
+    result = dict(product)
+    result["cat_name"] = _category_name_locked(result.get("category_id"))
+    return result
 
 
 async def init_db():
-    pool = await get_pool()
-    await pool.execute("""
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL DEFAULT ''
-        );
+    """Создаёт или загружает JSON-файл данных и автоматически добавляет seed-каталог."""
+    global _store
+    async with _lock:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        if os.path.exists(DATA_FILE):
+            try:
+                with open(DATA_FILE, encoding="utf-8") as file:
+                    loaded = json.load(file)
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RuntimeError(f"Не удалось прочитать {DATA_FILE}: {exc}") from exc
+            if not isinstance(loaded, dict):
+                raise RuntimeError(f"Файл {DATA_FILE} должен содержать JSON-объект")
+            _store = _empty_store()
+            for key, value in loaded.items():
+                if key in _store:
+                    _store[key] = value
+            for collection in _COLLECTIONS:
+                if not isinstance(_store.get(collection), list):
+                    _store[collection] = []
+            if not isinstance(_store.get("settings"), dict):
+                _store["settings"] = {}
+            if not isinstance(_store.get("counters"), dict):
+                _store["counters"] = {}
+        else:
+            _store = _empty_store()
 
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            telegram_id BIGINT UNIQUE NOT NULL,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
+        # Восстанавливаем счётчики даже после ручного редактирования JSON.
+        for collection in _COUNTER_NAMES:
+            largest_id = max(
+                (int(row.get("id", 0)) for row in _state()[collection]),
+                default=0,
+            )
+            _state()["counters"][collection] = max(
+                int(_state()["counters"].get(collection, 0)), largest_id
+            )
 
-        CREATE TABLE IF NOT EXISTS categories (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            emoji TEXT NOT NULL DEFAULT '',
-            order_num INT NOT NULL DEFAULT 0
-        );
+        # При первом запуске сохраняем каталог из seed_products.py. Фото остаются
+        # на диске в seed_photos и не отправляются пользователям все сразу.
+        if not _state()["products"] and os.path.isdir(os.path.join(BASE_DIR, "seed_photos")):
+            from seed_products import CATEGORY_EMOJIS, PRICES, PRODUCTS
 
-        CREATE TABLE IF NOT EXISTS products (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            price NUMERIC(12,2) NOT NULL DEFAULT 0,
-            category_id INT REFERENCES categories(id) ON DELETE SET NULL,
-            in_stock BOOLEAN NOT NULL DEFAULT TRUE,
-            views INT NOT NULL DEFAULT 0,
-            photos TEXT[] NOT NULL DEFAULT '{}',
-            photo_folder TEXT NOT NULL DEFAULT '',
-            seed_folder TEXT NOT NULL DEFAULT ''
-        );
+            categories_by_name: dict[str, int] = {}
+            for product in PRODUCTS:
+                category_name = product["category"]
+                category_id = categories_by_name.get(category_name)
+                if category_id is None:
+                    category_id = _next_id_locked("categories")
+                    _state()["categories"].append(
+                        {
+                            "id": category_id,
+                            "name": category_name,
+                            "emoji": CATEGORY_EMOJIS.get(category_name, "📦"),
+                            "order_num": category_id,
+                        }
+                    )
+                    categories_by_name[category_name] = category_id
+                product_id = _next_id_locked("products")
+                _state()["products"].append(
+                    {
+                        "id": product_id,
+                        "name": product["name"],
+                        "description": product.get("description", ""),
+                        "price": float(PRICES.get(product["name"], 0)),
+                        "category_id": category_id,
+                        "in_stock": True,
+                        "views": 0,
+                        "photos": [],
+                        "photo_folder": "",
+                        "seed_folder": product["photos_dir"],
+                    }
+                )
 
-        CREATE TABLE IF NOT EXISTS reviews (
-            id SERIAL PRIMARY KEY,
-            user_id BIGINT NOT NULL,
-            username TEXT,
-            text TEXT NOT NULL DEFAULT '',
-            rating INT NOT NULL DEFAULT 5,
-            photo_file_id TEXT,
-            is_approved BOOLEAN NOT NULL DEFAULT FALSE,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        CREATE TABLE IF NOT EXISTS product_clicks (
-            id SERIAL PRIMARY KEY,
-            product_id INT REFERENCES products(id) ON DELETE CASCADE,
-            user_id BIGINT NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-
-        CREATE TABLE IF NOT EXISTS favorites (
-            user_id BIGINT NOT NULL,
-            product_id INT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-            PRIMARY KEY (user_id, product_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS orders (
-            id SERIAL PRIMARY KEY,
-            user_id BIGINT NOT NULL,
-            username TEXT NOT NULL DEFAULT '',
-            first_name TEXT NOT NULL DEFAULT '',
-            product_id INT REFERENCES products(id) ON DELETE SET NULL,
-            product_name TEXT NOT NULL,
-            product_price NUMERIC(12,2) NOT NULL DEFAULT 0,
-            comment TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'new',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-    """)
-
-    # Миграции для существующих таблиц
-    for sql in [
-        "ALTER TABLE products ADD COLUMN IF NOT EXISTS photo_folder TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE products ADD COLUMN IF NOT EXISTS seed_folder TEXT NOT NULL DEFAULT ''",
-    ]:
-        await pool.execute(sql)
+        _save_locked()
 
 
-# ─── Settings ──────────────────────────────────────────────────────────────
+async def close_pool():
+    """Совместимость с прежним main.py: JSON уже сохраняется после каждой записи."""
+    async with _lock:
+        if _store is not None:
+            _save_locked()
+
+
+# ─── Settings ────────────────────────────────────────────────────────────────
 
 async def get_setting(key: str) -> str:
-    pool = await get_pool()
-    row = await pool.fetchrow("SELECT value FROM settings WHERE key=$1", key)
-    return row["value"] if row else ""
+    async with _lock:
+        return str(_state()["settings"].get(key, ""))
 
 
 async def set_setting(key: str, value: str):
-    pool = await get_pool()
-    await pool.execute(
-        "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value=$2",
-        key, value
-    )
+    async with _lock:
+        _state()["settings"][key] = value
+        _save_locked()
 
 
-# ─── Users ─────────────────────────────────────────────────────────────────
+# ─── Users ───────────────────────────────────────────────────────────────────
 
 async def upsert_user(telegram_id: int, username: str, first_name: str, last_name: str):
-    pool = await get_pool()
-    await pool.execute(
-        """INSERT INTO users (telegram_id, username, first_name, last_name)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (telegram_id) DO UPDATE
-           SET username=$2, first_name=$3, last_name=$4""",
-        telegram_id, username, first_name, last_name
-    )
+    async with _lock:
+        store = _state()
+        user = next(
+            (item for item in store["users"] if item["telegram_id"] == telegram_id),
+            None,
+        )
+        if user is None:
+            user = {
+                "id": _next_id_locked("users"),
+                "telegram_id": telegram_id,
+                "username": username,
+                "first_name": first_name,
+                "last_name": last_name,
+                "created_at": _now(),
+            }
+            store["users"].append(user)
+        else:
+            user.update(
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+            )
+        _save_locked()
 
 
 async def get_users_count() -> int:
-    pool = await get_pool()
-    row = await pool.fetchrow("SELECT COUNT(*) as cnt FROM users")
-    return row["cnt"]
+    async with _lock:
+        return len(_state()["users"])
 
 
 async def get_new_users_today() -> int:
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        "SELECT COUNT(*) as cnt FROM users WHERE created_at >= CURRENT_DATE"
-    )
-    return row["cnt"]
+    today = date.today()
+    async with _lock:
+        return sum(
+            1
+            for user in _state()["users"]
+            if _as_datetime(user.get("created_at")).date() == today
+        )
 
 
-# ─── Categories ────────────────────────────────────────────────────────────
+# ─── Categories ──────────────────────────────────────────────────────────────
 
 async def get_categories() -> list:
-    pool = await get_pool()
-    return await pool.fetch("SELECT * FROM categories ORDER BY order_num, id")
+    async with _lock:
+        rows = sorted(
+            _state()["categories"],
+            key=lambda item: (item.get("order_num", 0), item["id"]),
+        )
+        return _public_many(rows)
 
 
 async def get_category(category_id: int):
-    pool = await get_pool()
-    return await pool.fetchrow("SELECT * FROM categories WHERE id=$1", category_id)
+    async with _lock:
+        row = next(
+            (item for item in _state()["categories"] if item["id"] == category_id),
+            None,
+        )
+        return _public(row)
 
 
 async def add_category(name: str, emoji: str) -> int:
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        "INSERT INTO categories (name, emoji) VALUES ($1, $2) RETURNING id",
-        name, emoji
-    )
-    return row["id"]
+    async with _lock:
+        category_id = _next_id_locked("categories")
+        _state()["categories"].append(
+            {
+                "id": category_id,
+                "name": name,
+                "emoji": emoji,
+                "order_num": category_id,
+            }
+        )
+        _save_locked()
+        return category_id
 
 
 async def delete_category(category_id: int):
-    pool = await get_pool()
-    await pool.execute("DELETE FROM categories WHERE id=$1", category_id)
+    async with _lock:
+        _state()["categories"] = [
+            item for item in _state()["categories"] if item["id"] != category_id
+        ]
+        for product in _state()["products"]:
+            if product.get("category_id") == category_id:
+                product["category_id"] = None
+        _save_locked()
 
 
-# ─── Products ──────────────────────────────────────────────────────────────
+# ─── Products ────────────────────────────────────────────────────────────────
 
 async def get_products_by_category(category_id: int) -> list:
-    pool = await get_pool()
-    return await pool.fetch(
-        "SELECT * FROM products WHERE category_id=$1 AND in_stock=TRUE ORDER BY id DESC",
-        category_id
-    )
+    async with _lock:
+        rows = [
+            _product_view_locked(item)
+            for item in _state()["products"]
+            if item.get("category_id") == category_id and item.get("in_stock", True)
+        ]
+        rows.sort(key=lambda item: item["id"], reverse=True)
+        return _public_many(rows)
 
 
 async def get_all_products(include_out_of_stock: bool = False) -> list:
-    pool = await get_pool()
-    if include_out_of_stock:
-        return await pool.fetch(
-            "SELECT p.*, c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id ORDER BY p.id DESC"
-        )
-    return await pool.fetch(
-        "SELECT p.*, c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id WHERE p.in_stock=TRUE ORDER BY p.id DESC"
-    )
+    async with _lock:
+        rows = [
+            _product_view_locked(item)
+            for item in _state()["products"]
+            if include_out_of_stock or item.get("in_stock", True)
+        ]
+        rows.sort(key=lambda item: item["id"], reverse=True)
+        return _public_many(rows)
 
 
 async def get_product(product_id: int):
-    pool = await get_pool()
-    return await pool.fetchrow(
-        "SELECT p.*, c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id WHERE p.id=$1",
-        product_id
-    )
+    async with _lock:
+        row = next(
+            (item for item in _state()["products"] if item["id"] == product_id),
+            None,
+        )
+        return _public(_product_view_locked(row)) if row else None
 
 
 async def search_products(query: str) -> list:
-    pool = await get_pool()
-    return await pool.fetch(
-        "SELECT p.*, c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id "
-        "WHERE (LOWER(p.name) LIKE $1 OR LOWER(p.description) LIKE $1) AND p.in_stock=TRUE ORDER BY p.id DESC",
-        f"%{query.lower()}%"
-    )
+    needle = query.casefold()
+    async with _lock:
+        rows = [
+            _product_view_locked(item)
+            for item in _state()["products"]
+            if item.get("in_stock", True)
+            and (
+                needle in str(item.get("name", "")).casefold()
+                or needle in str(item.get("description", "")).casefold()
+            )
+        ]
+        rows.sort(key=lambda item: item["id"], reverse=True)
+        return _public_many(rows)
 
 
-async def add_product(category_id: int, name: str, description: str, price: float,
-                      photos: list, photo_folder: str = "") -> int:
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        "INSERT INTO products (category_id, name, description, price, photos, photo_folder) "
-        "VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-        category_id, name, description, price, photos, photo_folder
-    )
-    return row["id"]
+async def add_product(
+    category_id: int,
+    name: str,
+    description: str,
+    price: float,
+    photos: list,
+    photo_folder: str = "",
+) -> int:
+    async with _lock:
+        product_id = _next_id_locked("products")
+        _state()["products"].append(
+            {
+                "id": product_id,
+                "name": name,
+                "description": description,
+                "price": float(price),
+                "category_id": category_id,
+                "in_stock": True,
+                "views": 0,
+                "photos": list(photos or []),
+                "photo_folder": photo_folder,
+                "seed_folder": "",
+            }
+        )
+        _save_locked()
+        return product_id
 
 
 async def update_product(product_id: int, field: str, value):
-    pool = await get_pool()
     allowed = {"name", "description", "price", "in_stock", "photo_folder", "seed_folder"}
     if field not in allowed:
         raise ValueError(f"Field {field} not allowed")
-    await pool.execute(f"UPDATE products SET {field}=$1 WHERE id=$2", value, product_id)
+    async with _lock:
+        product = next(
+            (item for item in _state()["products"] if item["id"] == product_id),
+            None,
+        )
+        if product is None:
+            raise ValueError(f"Product {product_id} not found")
+        if field == "price":
+            value = float(value)
+        product[field] = value
+        _save_locked()
 
 
 async def delete_product(product_id: int):
-    pool = await get_pool()
-    await pool.execute("DELETE FROM products WHERE id=$1", product_id)
+    async with _lock:
+        _state()["products"] = [
+            item for item in _state()["products"] if item["id"] != product_id
+        ]
+        _state()["favorites"] = [
+            item for item in _state()["favorites"] if item["product_id"] != product_id
+        ]
+        _state()["product_clicks"] = [
+            item for item in _state()["product_clicks"] if item["product_id"] != product_id
+        ]
+        for order in _state()["orders"]:
+            if order.get("product_id") == product_id:
+                order["product_id"] = None
+        _save_locked()
 
 
 async def increment_views(product_id: int):
-    pool = await get_pool()
-    await pool.execute("UPDATE products SET views=views+1 WHERE id=$1", product_id)
+    async with _lock:
+        product = next(
+            (item for item in _state()["products"] if item["id"] == product_id),
+            None,
+        )
+        if product:
+            product["views"] = int(product.get("views", 0)) + 1
+            _save_locked()
 
 
 async def add_product_click(product_id: int, user_id: int):
-    pool = await get_pool()
-    await pool.execute(
-        "INSERT INTO product_clicks (product_id, user_id) VALUES ($1, $2)",
-        product_id, user_id
-    )
+    async with _lock:
+        _state()["product_clicks"].append(
+            {
+                "id": _next_id_locked("product_clicks"),
+                "product_id": product_id,
+                "user_id": user_id,
+                "created_at": _now(),
+            }
+        )
+        _save_locked()
 
 
-# ─── Reviews ───────────────────────────────────────────────────────────────
+# ─── Reviews ─────────────────────────────────────────────────────────────────
 
 async def get_approved_reviews(limit: int = 10, offset: int = 0) -> list:
-    pool = await get_pool()
-    return await pool.fetch(
-        "SELECT * FROM reviews WHERE is_approved=TRUE ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-        limit, offset
-    )
+    async with _lock:
+        rows = [
+            item for item in _state()["reviews"] if item.get("is_approved", False)
+        ]
+        rows.sort(key=lambda item: _as_datetime(item.get("created_at")), reverse=True)
+        return _public_many(rows[offset : offset + limit])
 
 
 async def get_pending_reviews() -> list:
-    pool = await get_pool()
-    return await pool.fetch("SELECT * FROM reviews WHERE is_approved=FALSE ORDER BY created_at DESC")
+    async with _lock:
+        rows = [
+            item for item in _state()["reviews"] if not item.get("is_approved", False)
+        ]
+        rows.sort(key=lambda item: _as_datetime(item.get("created_at")), reverse=True)
+        return _public_many(rows)
 
 
-async def add_review(user_id: int, username: str, text: str, rating: int, photo_file_id: str = None) -> int:
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        "INSERT INTO reviews (user_id, username, text, rating, photo_file_id) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-        user_id, username, text, rating, photo_file_id
-    )
-    return row["id"]
+async def add_review(
+    user_id: int,
+    username: str,
+    text: str,
+    rating: int,
+    photo_file_id: str = None,
+) -> int:
+    async with _lock:
+        review_id = _next_id_locked("reviews")
+        _state()["reviews"].append(
+            {
+                "id": review_id,
+                "user_id": user_id,
+                "username": username,
+                "text": text,
+                "rating": int(rating),
+                "photo_file_id": photo_file_id,
+                "is_approved": False,
+                "created_at": _now(),
+            }
+        )
+        _save_locked()
+        return review_id
 
 
 async def approve_review(review_id: int):
-    pool = await get_pool()
-    await pool.execute("UPDATE reviews SET is_approved=TRUE WHERE id=$1", review_id)
+    async with _lock:
+        for review in _state()["reviews"]:
+            if review["id"] == review_id:
+                review["is_approved"] = True
+                break
+        _save_locked()
 
 
 async def delete_review(review_id: int):
-    pool = await get_pool()
-    await pool.execute("DELETE FROM reviews WHERE id=$1", review_id)
+    async with _lock:
+        _state()["reviews"] = [
+            item for item in _state()["reviews"] if item["id"] != review_id
+        ]
+        _save_locked()
 
 
 async def get_reviews_count() -> int:
-    pool = await get_pool()
-    row = await pool.fetchrow("SELECT COUNT(*) as cnt FROM reviews WHERE is_approved=TRUE")
-    return row["cnt"]
+    async with _lock:
+        return sum(1 for item in _state()["reviews"] if item.get("is_approved", False))
 
 
-# ─── Stats ─────────────────────────────────────────────────────────────────
+# ─── Stats ───────────────────────────────────────────────────────────────────
 
 async def get_top_products(limit: int = 10) -> list:
-    pool = await get_pool()
-    return await pool.fetch(
-        "SELECT id, name, price, views, in_stock FROM products ORDER BY views DESC LIMIT $1",
-        limit
-    )
+    async with _lock:
+        rows = [
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "price": item["price"],
+                "views": int(item.get("views", 0)),
+                "in_stock": item.get("in_stock", True),
+            }
+            for item in _state()["products"]
+        ]
+        rows.sort(key=lambda item: item["views"], reverse=True)
+        return _public_many(rows[:limit])
 
 
 async def get_top_clicked_products(limit: int = 10) -> list:
-    pool = await get_pool()
-    return await pool.fetch(
-        """SELECT p.id, p.name, p.price, COUNT(pc.id) as clicks
-           FROM products p
-           LEFT JOIN product_clicks pc ON p.id=pc.product_id
-           GROUP BY p.id, p.name, p.price
-           ORDER BY clicks DESC
-           LIMIT $1""",
-        limit
-    )
+    async with _lock:
+        click_counts: dict[int, int] = {}
+        for click in _state()["product_clicks"]:
+            product_id = click["product_id"]
+            click_counts[product_id] = click_counts.get(product_id, 0) + 1
+        rows = []
+        for product in _state()["products"]:
+            rows.append(
+                {
+                    "id": product["id"],
+                    "name": product["name"],
+                    "price": product["price"],
+                    "clicks": click_counts.get(product["id"], 0),
+                }
+            )
+        rows.sort(key=lambda item: item["clicks"], reverse=True)
+        return _public_many(rows[:limit])
 
 
 async def get_total_clicks() -> int:
-    pool = await get_pool()
-    row = await pool.fetchrow("SELECT COUNT(*) as cnt FROM product_clicks")
-    return row["cnt"]
+    async with _lock:
+        return len(_state()["product_clicks"])
 
 
-# ─── Favorites ─────────────────────────────────────────────────────────────
+# ─── Favorites ───────────────────────────────────────────────────────────────
 
 async def add_favorite(user_id: int, product_id: int):
-    pool = await get_pool()
-    await pool.execute(
-        "INSERT INTO favorites (user_id, product_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-        user_id, product_id
-    )
+    async with _lock:
+        exists = any(
+            item["user_id"] == user_id and item["product_id"] == product_id
+            for item in _state()["favorites"]
+        )
+        if not exists:
+            _state()["favorites"].append(
+                {"user_id": user_id, "product_id": product_id}
+            )
+            _save_locked()
 
 
 async def remove_favorite(user_id: int, product_id: int):
-    pool = await get_pool()
-    await pool.execute(
-        "DELETE FROM favorites WHERE user_id=$1 AND product_id=$2",
-        user_id, product_id
-    )
+    async with _lock:
+        _state()["favorites"] = [
+            item
+            for item in _state()["favorites"]
+            if not (item["user_id"] == user_id and item["product_id"] == product_id)
+        ]
+        _save_locked()
 
 
 async def is_favorite(user_id: int, product_id: int) -> bool:
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        "SELECT 1 FROM favorites WHERE user_id=$1 AND product_id=$2",
-        user_id, product_id
-    )
-    return row is not None
+    async with _lock:
+        return any(
+            item["user_id"] == user_id and item["product_id"] == product_id
+            for item in _state()["favorites"]
+        )
 
 
 async def get_user_favorites(user_id: int) -> list:
-    pool = await get_pool()
-    return await pool.fetch(
-        """SELECT p.*, c.name as cat_name
-           FROM favorites f
-           JOIN products p ON f.product_id = p.id
-           LEFT JOIN categories c ON p.category_id = c.id
-           WHERE f.user_id = $1
-           ORDER BY f.product_id DESC""",
-        user_id
-    )
+    async with _lock:
+        product_ids = {
+            item["product_id"]
+            for item in _state()["favorites"]
+            if item["user_id"] == user_id
+        }
+        rows = [
+            _product_view_locked(item)
+            for item in _state()["products"]
+            if item["id"] in product_ids
+        ]
+        rows.sort(key=lambda item: item["id"], reverse=True)
+        return _public_many(rows)
 
 
-# ─── Orders ────────────────────────────────────────────────────────────────
+# ─── Orders ──────────────────────────────────────────────────────────────────
 
-async def create_order(user_id: int, username: str, first_name: str,
-                       product_id: int, product_name: str, product_price: float,
-                       comment: str = "") -> int:
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        """INSERT INTO orders (user_id, username, first_name, product_id, product_name, product_price, comment)
-           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id""",
-        user_id, username, first_name, product_id, product_name, product_price, comment
-    )
-    return row["id"]
+async def create_order(
+    user_id: int,
+    username: str,
+    first_name: str,
+    product_id: int,
+    product_name: str,
+    product_price: float,
+    comment: str = "",
+) -> int:
+    async with _lock:
+        order_id = _next_id_locked("orders")
+        _state()["orders"].append(
+            {
+                "id": order_id,
+                "user_id": user_id,
+                "username": username,
+                "first_name": first_name,
+                "product_id": product_id,
+                "product_name": product_name,
+                "product_price": float(product_price),
+                "comment": comment,
+                "status": "new",
+                "created_at": _now(),
+            }
+        )
+        _save_locked()
+        return order_id
 
 
 async def get_orders(limit: int = 50) -> list:
-    pool = await get_pool()
-    return await pool.fetch(
-        "SELECT * FROM orders ORDER BY created_at DESC LIMIT $1", limit
-    )
+    async with _lock:
+        rows = sorted(
+            _state()["orders"],
+            key=lambda item: _as_datetime(item.get("created_at")),
+            reverse=True,
+        )
+        return _public_many(rows[:limit])
 
 
 async def get_order(order_id: int):
-    pool = await get_pool()
-    return await pool.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
+    async with _lock:
+        row = next(
+            (item for item in _state()["orders"] if item["id"] == order_id),
+            None,
+        )
+        return _public(row)
 
 
 async def get_orders_count() -> int:
-    pool = await get_pool()
-    row = await pool.fetchrow("SELECT COUNT(*) as cnt FROM orders")
-    return row["cnt"]
+    async with _lock:
+        return len(_state()["orders"])

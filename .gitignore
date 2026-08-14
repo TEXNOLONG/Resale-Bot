@@ -53,3 +53,6 @@ Thumbs.db
 
 # Telegram bot runtime data
 bots/telegram-bot/bot.log
+
+# Local JSON store (users, orders, settings)
+bots/telegram-bot/data/

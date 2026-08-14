@@ -1,30 +1,17 @@
 """
-Скрипт для заполнения базы данных начальными товарами.
-Запускается один раз из папки bots/telegram-bot/
+Скрипт для заполнения локального JSON-хранилища начальными товарами.
+Запускается один раз из папки bots/telegram-bot/ (обычно не нужен:
+каталог создаётся автоматически при первом старте бота).
 
 Фото читаются с диска из папки seed_photos/ — никуда не отправляются.
 
-Требования:
-  - DATABASE_URL в .env или переменных окружения
-
 Запуск:
-  cd bots/telegram-bot
   python3.11 seed_products.py
 """
 
 import asyncio
 import os
-import sys
-
-import asyncpg
-from dotenv import load_dotenv
-
-load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-
-if not DATABASE_URL:
-    sys.exit("ERROR: DATABASE_URL не задан")
+import database as db
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ЦЕНЫ — установите нужные значения перед запуском, потом можно поменять в боте
@@ -182,55 +169,36 @@ CATEGORY_EMOJIS = {
 }
 
 
-async def upload_photos(folder: str) -> list[str]:
-    """Устарело — теперь фото читаются с диска напрямую через seed_folder."""
-    return []
-
-
-async def get_or_create_category(pool: asyncpg.Pool, name: str) -> int:
-    row = await pool.fetchrow("SELECT id FROM categories WHERE name=$1", name)
-    if row:
-        return row["id"]
-    emoji = CATEGORY_EMOJIS.get(name, "")
-    row = await pool.fetchrow(
-        "INSERT INTO categories (name, emoji) VALUES ($1, $2) RETURNING id",
-        name, emoji,
-    )
-    print(f"  Создана категория: {emoji} {name} (id={row['id']})")
-    return row["id"]
-
-
-async def product_exists(pool: asyncpg.Pool, name: str) -> bool:
-    row = await pool.fetchrow("SELECT id FROM products WHERE name=$1", name)
-    return row is not None
-
-
 async def main():
     print("=== Seed: загрузка товаров ===\n")
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3)
+    await db.init_db()
+    categories = await db.get_categories()
+    products = await db.get_all_products(include_out_of_stock=True)
+    category_ids = {category["name"]: category["id"] for category in categories}
+    product_names = {product["name"] for product in products}
 
-    try:
-        for product in PRODUCTS:
-            name = product["name"]
-            print(f"[{name}]")
-
-            if await product_exists(pool, name):
-                print(f"  Уже существует, пропускаем.\n")
-                continue
-
-            cat_id = await get_or_create_category(pool, product["category"])
-
-            price = PRICES.get(name, 0)
-            seed_folder = product["photos_dir"]
-            row = await pool.fetchrow(
-                """INSERT INTO products (category_id, name, description, price, photos, seed_folder)
-                   VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
-                cat_id, name, product["description"], float(price), [], seed_folder,
+    for product in PRODUCTS:
+        name = product["name"]
+        if name in product_names:
+            print(f"  Уже существует: {name}")
+            continue
+        category_id = category_ids.get(product["category"])
+        if category_id is None:
+            category_id = await db.add_category(
+                product["category"],
+                CATEGORY_EMOJIS.get(product["category"], "📦"),
             )
-            print(f"  Добавлен товар id={row['id']}, seed_folder={seed_folder}, цена={price} руб.\n")
-
-    finally:
-        await pool.close()
+            category_ids[product["category"]] = category_id
+        product_id = await db.add_product(
+            category_id,
+            name,
+            product["description"],
+            float(PRICES.get(name, 0)),
+            photos=[],
+            photo_folder="",
+        )
+        await db.update_product(product_id, "seed_folder", product["photos_dir"])
+        print(f"  Добавлен товар id={product_id}: {name}")
 
     print("=== Готово! ===")
     if any(v == 0 for v in PRICES.values()):
