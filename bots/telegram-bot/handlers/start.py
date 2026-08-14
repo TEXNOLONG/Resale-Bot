@@ -1,6 +1,6 @@
 from aiogram import Router, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InputMediaPhoto
 from aiogram.fsm.context import FSMContext
 
 import database as db
@@ -19,22 +19,46 @@ async def send_main_menu(message: Message, edit: bool = False):
 
     kb = main_menu_kb()
 
-    if welcome_photo:
-        # Всегда удаляем старое сообщение и отправляем новое с фото
-        if edit:
-            try:
-                await message.delete()
-            except Exception:
-                pass
-        await message.answer_photo(welcome_photo, caption=welcome_text, reply_markup=kb)
-    else:
-        if edit:
-            try:
-                await message.edit_text(welcome_text, reply_markup=kb)
-            except Exception:
-                await message.answer(welcome_text, reply_markup=kb)
+    if not edit:
+        if welcome_photo:
+            await message.answer_photo(
+                welcome_photo, caption=welcome_text, reply_markup=kb, parse_mode="HTML"
+            )
         else:
-            await message.answer(welcome_text, reply_markup=kb)
+            await message.answer(welcome_text, reply_markup=kb, parse_mode="HTML")
+        return
+
+    if welcome_photo and message.photo:
+        await message.edit_media(
+            InputMediaPhoto(
+                media=welcome_photo,
+                caption=welcome_text,
+                parse_mode="HTML",
+            ),
+            reply_markup=kb,
+        )
+        return
+
+    if welcome_photo:
+        # Telegram не умеет превратить текстовое сообщение в фото редактированием.
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await message.answer_photo(
+            welcome_photo, caption=welcome_text, reply_markup=kb, parse_mode="HTML"
+        )
+        return
+
+    if message.photo:
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await message.answer(welcome_text, reply_markup=kb, parse_mode="HTML")
+        return
+
+    await message.edit_text(welcome_text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(CommandStart())
@@ -85,7 +109,16 @@ async def cb_about_us(callback: CallbackQuery):
             "Чтобы добавить текст «О нас», перейдите в Настройки в панели администратора."
         )
     full_text = f"ℹ️ <b>О нас</b>\n\n{about_text}"
-    if about_photo:
+    if about_photo and callback.message.photo:
+        await callback.message.edit_media(
+            InputMediaPhoto(
+                media=about_photo,
+                caption=full_text,
+                parse_mode="HTML",
+            ),
+            reply_markup=back_to_menu_kb(),
+        )
+    elif about_photo:
         try:
             await callback.message.delete()
         except Exception:
@@ -94,14 +127,24 @@ async def cb_about_us(callback: CallbackQuery):
             about_photo,
             caption=full_text,
             reply_markup=back_to_menu_kb(),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
     else:
-        await safe_edit_text(callback.message, 
-            full_text,
-            reply_markup=back_to_menu_kb(),
-            parse_mode="HTML"
-        )
+        if callback.message.photo:
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer(
+                full_text, reply_markup=back_to_menu_kb(), parse_mode="HTML"
+            )
+        else:
+            await safe_edit_text(
+                callback.message,
+                full_text,
+                reply_markup=back_to_menu_kb(),
+                parse_mode="HTML",
+            )
 
 
 @router.callback_query(F.data == "noop")

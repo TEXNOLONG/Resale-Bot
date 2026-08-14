@@ -44,7 +44,6 @@ timeoutMs = 20000
 [userenv.shared]
 ADMIN_IDS = "7307275806,1038562411"
 SHOP_NAME = "veachelsell"
-BOT_TOKEN = "8324560210:AAF1vVG78vsXFSdXA3c2-Gyg0I6eKXktric"
 
 [nix]
 channel = "stable-25_05"

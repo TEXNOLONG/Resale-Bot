@@ -1,3 +1,6 @@
+import logging
+from html import escape
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -8,13 +11,13 @@ from keyboards.main_kb import back_to_menu_kb
 from states.forms import PlaceOrder, AdminReply
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 # ─── Начало оформления заказа ────────────────────────────────────────────────
 
 @router.callback_query(F.data.regexp(r'^order_\d+$'))
 async def cb_order_start(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
     product_id = int(callback.data.split("_")[1])
     product = await db.get_product(product_id)
 
@@ -22,7 +25,9 @@ async def cb_order_start(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Товар не найден.", show_alert=True)
         return
 
+    await callback.answer()
     price_fmt = f"{product['price']:,.0f}".replace(",", " ")
+    product_name = escape(str(product["name"]))
     await state.update_data(product_id=product_id,
                             product_name=product["name"],
                             product_price=float(product["price"]))
@@ -34,7 +39,7 @@ async def cb_order_start(callback: CallbackQuery, state: FSMContext):
     ])
     await callback.message.answer(
         f"🛒 <b>Оформление заказа</b>\n\n"
-        f"📦 {product['name']}\n"
+        f"📦 {product_name}\n"
         f"💰 {price_fmt} ₽\n\n"
         f"Оставьте комментарий к заказу\n"
         f"<i>(размер, цвет, способ связи и т.д.)</i>\n\n"
@@ -46,11 +51,16 @@ async def cb_order_start(callback: CallbackQuery, state: FSMContext):
 
 # ─── Комментарий пользователя ────────────────────────────────────────────────
 
-@router.message(PlaceOrder.comment)
+@router.message(PlaceOrder.comment, F.text)
 async def process_order_comment(message: Message, state: FSMContext):
     comment = message.text.strip()
     await state.update_data(comment=comment)
     await _show_confirm(message, state)
+
+
+@router.message(PlaceOrder.comment)
+async def process_invalid_order_comment(message: Message):
+    await message.answer("Пожалуйста, отправьте комментарий текстом или нажмите «Пропустить».")
 
 
 @router.callback_query(PlaceOrder.comment, F.data == "order_skip_comment")
@@ -62,7 +72,7 @@ async def cb_skip_comment(callback: CallbackQuery, state: FSMContext):
 
 async def _show_confirm(message: Message, state: FSMContext, edit: bool = False):
     data = await state.get_data()
-    product_name = data.get("product_name", "—")
+    product_name = escape(str(data.get("product_name", "—")))
     product_price = data.get("product_price", 0)
     comment = data.get("comment", "")
     price_fmt = f"{product_price:,.0f}".replace(",", " ")
@@ -73,7 +83,7 @@ async def _show_confirm(message: Message, state: FSMContext, edit: bool = False)
         f"💰 {price_fmt} ₽\n"
     )
     if comment:
-        text += f"\n💬 Комментарий: {comment}"
+        text += f"\n💬 Комментарий: {escape(str(comment))}"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -126,16 +136,20 @@ async def cb_order_confirm(callback: CallbackQuery, state: FSMContext):
     )
 
     # Уведомление всем администраторам
-    username_str = f"@{user.username}" if user.username else f"{user.first_name or 'Покупатель'}"
+    username_str = (
+        f"@{escape(user.username)}"
+        if user.username
+        else escape(user.first_name or "Покупатель")
+    )
     admin_text = (
         f"🛒 <b>Новый заказ #{order_id}</b>\n\n"
         f"👤 {username_str}  (ID: <code>{user.id}</code>)\n"
         f"🔗 tg://user?id={user.id}\n\n"
-        f"📦 {product_name}\n"
+        f"📦 {escape(str(product_name))}\n"
         f"💰 {price_fmt} ₽\n"
     )
     if comment:
-        admin_text += f"\n💬 <i>{comment}</i>"
+        admin_text += f"\n💬 <i>{escape(str(comment))}</i>"
 
     from keyboards.admin_kb import order_reply_kb
     for admin_id in ADMIN_IDS:
@@ -147,7 +161,7 @@ async def cb_order_confirm(callback: CallbackQuery, state: FSMContext):
                 parse_mode="HTML"
             )
         except Exception:
-            pass
+            logger.exception("Не удалось отправить уведомление администратору")
 
 
 # ─── Ответ администратора покупателю ─────────────────────────────────────────
@@ -168,7 +182,7 @@ async def cb_adm_reply_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminReply.message)
 
     order = await db.get_order(order_id)
-    product_name = order["product_name"] if order else "—"
+    product_name = escape(str(order["product_name"])) if order else "—"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Отмена", callback_data="adm_back")]
@@ -199,7 +213,7 @@ async def process_admin_reply(message: Message, state: FSMContext):
 
     reply_text = (
         f"✉️ <b>Сообщение от магазина</b> (заказ #{order_id})\n\n"
-        f"{message.text}"
+        f"{escape(message.text or '')}"
     )
     try:
         await message.bot.send_message(user_id, reply_text, parse_mode="HTML")

@@ -40,32 +40,28 @@ async def _send_photo(callback: CallbackQuery, photo_type: str, photo_src: str, 
 
 
 async def _edit_photo(callback: CallbackQuery, photo_type: str, photo_src: str, caption: str, kb):
-    """Редактирует фото в сообщении без удаления (edit_media). Fallback — удалить и переслать."""
+    """Редактирует фото в текущем сообщении без удаления и нового сообщения."""
     if photo_type == "file":
         media = InputMediaPhoto(media=FSInputFile(photo_src), caption=caption, parse_mode="HTML")
     else:
         media = InputMediaPhoto(media=photo_src, caption=caption, parse_mode="HTML")
     try:
         await callback.message.edit_media(media, reply_markup=kb)
-    except Exception:
-        # Fallback: удалить и переслать
-        try:
-            await callback.message.delete()
-        except Exception:
-            pass
-        if photo_type == "file":
-            await callback.message.answer_photo(
-                FSInputFile(photo_src), caption=caption, reply_markup=kb, parse_mode="HTML"
-            )
-        else:
-            await callback.message.answer_photo(
-                photo_src, caption=caption, reply_markup=kb, parse_mode="HTML"
-            )
+    except Exception as exc:
+        # На swipe не создаём запасное сообщение: иначе чат начинает дублироваться.
+        await callback.answer("Не удалось переключить фото", show_alert=True)
+        import logging
+        logging.getLogger(__name__).warning("Не удалось изменить фото товара: %s", exc)
 
 
 # ─── show product ─────────────────────────────────────────────────────────────
 
-async def show_product(callback: CallbackQuery, product_id: int, photo_num: int = 0):
+async def show_product(
+    callback: CallbackQuery,
+    product_id: int,
+    photo_num: int = 0,
+    edit_media: bool = False,
+):
     product = await db.get_product(product_id)
     if not product:
         await safe_text(callback, "Товар не найден.", None)
@@ -105,7 +101,7 @@ async def show_product(callback: CallbackQuery, product_id: int, photo_num: int 
 
     if photos:
         photo_type, photo_src = photos[photo_num]
-        if getattr(callback, '_use_edit_media', False):
+        if edit_media:
             await _edit_photo(callback, photo_type, photo_src, caption, kb)
         else:
             await _send_photo(callback, photo_type, photo_src, caption, kb)
@@ -164,5 +160,4 @@ async def cb_prodphoto(callback: CallbackQuery):
     product_id = int(parts[1])
     photo_num = int(parts[2])
     # Свайп — редактируем фото на месте без удаления сообщения
-    callback._use_edit_media = True
-    await show_product(callback, product_id, photo_num=photo_num)
+    await show_product(callback, product_id, photo_num=photo_num, edit_media=True)

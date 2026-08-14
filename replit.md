@@ -5,6 +5,7 @@ Telegram-бот для ресейл-магазина veachelsell: каталог
 ## Запуск
 
 - Workflow **Telegram Bot**: `cd bots/telegram-bot && python3.11 main.py`
+- VPS/локальный запуск: `./run_bot.sh` — при первом запуске создаёт `bots/telegram-bot/.venv`, устанавливает зависимости и запрашивает `BOT_TOKEN` и `DATABASE_URL` скрытым вводом. Значения не сохраняются в файлы.
 - Логи пишутся в `bots/telegram-bot/bot.log` (можно скачать через `/admin` → «Скачать логи»)
 
 ## Секреты и переменные
